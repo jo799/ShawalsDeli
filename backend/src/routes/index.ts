@@ -1,0 +1,121 @@
+import { Router } from 'express';
+import { login, getProfile, changePassword } from '../controllers/authController';
+import { getOrders, getOrderById, createOrder, updateOrderStatus, processPayment, cancelPendingPayment, refundOrder, voidOrder, getOrderStats } from '../controllers/ordersController';
+import { getMenuItems, getCategories, createMenuItem, updateMenuItem, deleteMenuItem, getRecipe, setRecipe } from '../controllers/menuController';
+import { uploadMenuImage } from '../controllers/uploadController';
+import { getInventory, adjustStock, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryActivity, getLowStock } from '../controllers/inventoryController';
+import { getCustomers, getCustomerById, createCustomer, updateCustomer } from '../controllers/customersController';
+import { getDailyReport, getWeeklyReport, getMonthlyReport } from '../controllers/reportsController';
+import { getExpenses, createExpense, updateExpense, deleteExpense, getExpenseCategories } from '../controllers/expensesController';
+import { getStaff, createStaff, updateStaff, getSchedules, upsertSchedule } from '../controllers/staffController';
+import { getTables, updateTableStatus, createTable, updateTable, deleteTable, getReservations, createReservation, updateReservationStatus } from '../controllers/tablesController';
+import { getPurchaseOrders, getPurchaseOrderById, createPurchaseOrder, getSuppliers } from '../controllers/purchasesController';
+import { initiateStkPush, queryStkStatus, mpesaCallback, reconcilePayment } from '../controllers/mpesaController';
+import { createHeldOrder, getHeldOrders, deleteHeldOrder } from '../controllers/heldOrdersController';
+import { authenticate, authorize } from '../middleware/auth';
+
+const router = Router();
+
+// Auth
+router.post('/auth/login', login);
+router.get('/auth/profile', authenticate, getProfile);
+router.put('/auth/change-password', authenticate, changePassword);
+
+// Orders
+router.get('/orders', authenticate, getOrders);
+// Must come before /orders/:id — otherwise Express matches "stats" as an :id
+// and this route is never reached.
+router.get('/orders/stats/active', authenticate, getOrderStats);
+router.get('/orders/:id', authenticate, getOrderById);
+router.post('/orders', authenticate, createOrder);
+router.put('/orders/:id/status', authenticate, updateOrderStatus);
+router.post('/orders/:id/payment', authenticate, processPayment);
+router.post('/orders/:id/cancel-payment', authenticate, cancelPendingPayment);
+// Returning money and voiding paid orders is a manager/admin action — it moves
+// money out of the business and reverses loyalty/stock.
+router.post('/orders/:id/refund', authenticate, authorize('administrator', 'manager'), refundOrder);
+router.post('/orders/:id/void', authenticate, authorize('administrator', 'manager'), voidOrder);
+
+// Menu
+router.get('/menu/items', authenticate, getMenuItems);
+router.get('/menu/categories', authenticate, getCategories);
+router.post('/menu/items', authenticate, authorize('administrator', 'manager'), createMenuItem);
+router.post('/menu/upload', authenticate, authorize('administrator', 'manager'), uploadMenuImage);
+router.put('/menu/items/:id', authenticate, authorize('administrator', 'manager'), updateMenuItem);
+router.delete('/menu/items/:id', authenticate, authorize('administrator', 'manager'), deleteMenuItem);
+router.get('/menu/items/:id/recipe', authenticate, getRecipe);
+router.put('/menu/items/:id/recipe', authenticate, authorize('administrator', 'manager'), setRecipe);
+
+// Inventory
+router.get('/inventory', authenticate, getInventory);
+router.get('/inventory/low-stock', authenticate, getLowStock);
+router.post('/inventory', authenticate, authorize('administrator', 'manager'), createInventoryItem);
+router.put('/inventory/:id', authenticate, authorize('administrator', 'manager'), updateInventoryItem);
+router.delete('/inventory/:id', authenticate, authorize('administrator', 'manager'), deleteInventoryItem);
+router.post('/inventory/:id/adjust', authenticate, adjustStock);
+router.get('/inventory/activity', authenticate, getInventoryActivity);
+
+// Customers
+router.get('/customers', authenticate, getCustomers);
+router.get('/customers/:id', authenticate, getCustomerById);
+router.post('/customers', authenticate, createCustomer);
+router.put('/customers/:id', authenticate, updateCustomer);
+
+// Reports
+router.get('/reports/daily', authenticate, getDailyReport);
+router.get('/reports/weekly', authenticate, getWeeklyReport);
+router.get('/reports/monthly', authenticate, getMonthlyReport);
+
+// Expenses
+router.get('/expenses', authenticate, getExpenses);
+router.get('/expenses/categories', authenticate, getExpenseCategories);
+router.post('/expenses', authenticate, createExpense);
+router.put('/expenses/:id', authenticate, updateExpense);
+router.delete('/expenses/:id', authenticate, authorize('administrator', 'manager'), deleteExpense);
+
+// Staff
+router.get('/staff', authenticate, authorize('administrator', 'manager'), getStaff);
+router.post('/staff', authenticate, authorize('administrator', 'manager'), createStaff);
+router.put('/staff/:id', authenticate, authorize('administrator', 'manager'), updateStaff);
+router.get('/staff/schedules', authenticate, getSchedules);
+router.post('/staff/schedules', authenticate, authorize('administrator', 'manager'), upsertSchedule);
+
+// Tables
+router.get('/tables', authenticate, getTables);
+router.put('/tables/:id/status', authenticate, updateTableStatus);
+// Adding/editing/removing tables is floor-plan configuration, not routine
+// service — same admin/manager restriction as menu management.
+router.post('/tables', authenticate, authorize('administrator', 'manager'), createTable);
+router.put('/tables/:id', authenticate, authorize('administrator', 'manager'), updateTable);
+router.delete('/tables/:id', authenticate, authorize('administrator', 'manager'), deleteTable);
+router.get('/tables/reservations', authenticate, getReservations);
+router.post('/tables/reservations', authenticate, createReservation);
+// Seating/cancelling/completing a reservation is routine floor operations —
+// same "any authenticated staff" access as updateTableStatus, not restricted
+// to admin/manager like adding/removing tables is.
+router.put('/tables/reservations/:id/status', authenticate, updateReservationStatus);
+
+// Held Orders (POS "Hold Order" / "Save Draft") — any authenticated staff
+// member can park or resume a cart; no admin restriction needed for a
+// routine POS action.
+router.get('/held-orders', authenticate, getHeldOrders);
+router.post('/held-orders', authenticate, createHeldOrder);
+router.delete('/held-orders/:id', authenticate, deleteHeldOrder);
+
+// Purchases
+router.get('/purchases', authenticate, getPurchaseOrders);
+router.get('/purchases/:id', authenticate, getPurchaseOrderById);
+router.post('/purchases', authenticate, authorize('administrator', 'manager'), createPurchaseOrder);
+router.get('/suppliers', authenticate, getSuppliers);
+
+// M-Pesa
+router.post('/mpesa/stk-push', authenticate, initiateStkPush);
+router.get('/mpesa/status/:checkout_request_id', authenticate, queryStkStatus);
+router.post('/mpesa/reconcile/:checkout_request_id', authenticate, reconcilePayment);
+router.post('/mpesa/callback', mpesaCallback); // No auth — called by Safaricom servers
+// Alias: the README (and anyone who configured Safaricom's Daraja portal
+// from it before this fix) references /api/payments/mpesa/callback. Keep
+// both live so existing callback URL configs don't silently break.
+router.post('/payments/mpesa/callback', mpesaCallback); // No auth — called by Safaricom servers
+
+export default router;
