@@ -29,12 +29,8 @@ const statusMap: Record<string, string> = {
 
 export default function OrdersPage() {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
-  // Refunding/voiding is money leaving the business — same restriction the
-  // backend already enforces (see routes/index.ts: authorize('administrator',
-  // 'manager')). Hiding the button for anyone else avoids a confusing 403
-  // toast on a click that was never going to be allowed.
-  const canRefund = user?.role === 'administrator' || user?.role === 'manager';
+  const { hasPermission } = useAuthStore();
+  const canRefund = hasPermission('orders.refund');
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [selected, setSelected] = useState<Order | null>(null);

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { query } from '../config/database';
+import { hasAnyPermission, Permission } from '../permissions';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -39,6 +40,16 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
 export const authorize = (...roles: string[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction): void => {
     if (!req.user || !roles.includes(req.user.role)) {
+      res.status(403).json({ success: false, message: 'Insufficient permissions' });
+      return;
+    }
+    next();
+  };
+};
+
+export const requirePermission = (...permissions: Permission[]) => {
+  return (req: AuthRequest, res: Response, next: NextFunction): void => {
+    if (!req.user || !hasAnyPermission(req.user.role, permissions)) {
       res.status(403).json({ success: false, message: 'Insufficient permissions' });
       return;
     }

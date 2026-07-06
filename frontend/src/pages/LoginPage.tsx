@@ -1,25 +1,33 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
+import { getDefaultRouteForRole } from '@shared/permissions';
+import type { Permission } from '@shared/permissions';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { login } = useAuthStore();
+  const { login, isAuthenticated, user } = useAuthStore();
   const [email, setEmail] = useState('joseph.kimunya@shawalsdei.com');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      navigate(getDefaultRouteForRole(user.role), { replace: true });
+    }
+  }, [isAuthenticated, user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       const { data } = await api.post('/auth/login', { email, password });
-      login(data.data.user, data.data.token);
-      navigate('/');
+      login(data.data.user, data.data.token, data.data.permissions as Permission[]);
+      navigate(getDefaultRouteForRole(data.data.user.role));
       toast.success(`Welcome back, ${data.data.user.full_name.split(' ')[0]}!`);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Login failed';

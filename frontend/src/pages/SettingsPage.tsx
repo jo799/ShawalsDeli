@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Save, Trash2, ChevronRight, Download } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
+import { ROLES, ROLE_LABELS, MATRIX_MODULES, roleHasModuleAccess } from '@shared/permissions';
 import toast from 'react-hot-toast';
 
 const TABS = ['General','Business','POS & Payments','Notifications','Users & Permissions','Backup & Restore','Integrations','System'];
@@ -396,22 +397,30 @@ export default function SettingsPage() {
           )}
 
           {activeTab === 'Users & Permissions' && (
-            <div className="max-w-2xl space-y-4">
+            <div className="max-w-4xl space-y-4">
               <h2 className="section-title">Users & Permissions</h2>
-              <div className="card overflow-hidden">
-                <table className="w-full">
+              <p className="text-sm text-text-muted">
+                Permissions are defined by system roles and cannot be changed here. Contact an administrator to assign roles via the Staff page.
+              </p>
+              <div className="card overflow-x-auto">
+                <table className="w-full min-w-[700px]">
                   <thead className="bg-surface-50">
-                    <tr>{['Role','Dashboard','POS','Orders','Inventory','Reports','Staff','Settings'].map(h => (
-                      <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
-                    ))}</tr>
+                    <tr>
+                      <th className="table-header px-4 py-3 text-left">Role</th>
+                      {MATRIX_MODULES.map(m => (
+                        <th key={m.key} className="table-header px-3 py-3 text-center text-xs">{m.label}</th>
+                      ))}
+                    </tr>
                   </thead>
                   <tbody>
-                    {['Administrator','Manager','Head Chef','Cashier','Waiter'].map(role => (
+                    {ROLES.map(role => (
                       <tr key={role} className="table-row">
-                        <td className="table-cell font-medium">{role}</td>
-                        {['Dashboard','POS','Orders','Inventory','Reports','Staff','Settings'].map(perm => (
-                          <td key={perm} className="table-cell">
-                            <input type="checkbox" defaultChecked={role === 'Administrator' || ['Dashboard','POS','Orders'].includes(perm)} className="accent-brand" />
+                        <td className="table-cell font-medium text-sm">{ROLE_LABELS[role]}</td>
+                        {MATRIX_MODULES.map(m => (
+                          <td key={m.key} className="table-cell text-center">
+                            <span className={`inline-block w-5 h-5 rounded text-xs leading-5 ${roleHasModuleAccess(role, m.key) ? 'bg-status-success/20 text-status-success' : 'bg-surface-50 text-text-muted'}`}>
+                              {roleHasModuleAccess(role, m.key) ? '✓' : '—'}
+                            </span>
                           </td>
                         ))}
                       </tr>
@@ -419,7 +428,6 @@ export default function SettingsPage() {
                   </tbody>
                 </table>
               </div>
-              <button onClick={() => toast.success('Permissions saved!')} className="btn-primary px-6">Save Permissions</button>
             </div>
           )}
 

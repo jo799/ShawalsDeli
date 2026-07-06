@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
+import { getPermissionsForRole } from '../permissions';
 
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -46,7 +47,14 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     const { password_hash, ...userWithoutPassword } = user;
     void password_hash;
 
-    res.json({ success: true, data: { token, user: userWithoutPassword } });
+    res.json({
+      success: true,
+      data: {
+        token,
+        user: userWithoutPassword,
+        permissions: getPermissionsForRole(user.role),
+      },
+    });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -59,7 +67,14 @@ export const getProfile = async (req: AuthRequest, res: Response): Promise<void>
       'SELECT id, full_name, email, phone, role, status, schedule_type, avatar_url, joined_date, last_login, created_at FROM users WHERE id = $1',
       [req.user!.id]
     );
-    res.json({ success: true, data: result.rows[0] });
+    const user = result.rows[0];
+    res.json({
+      success: true,
+      data: {
+        ...user,
+        permissions: getPermissionsForRole(user.role),
+      },
+    });
   } catch (error) {
     console.error('Get profile error:', error);
     res.status(500).json({ success: false, message: 'Server error' });

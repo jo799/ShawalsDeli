@@ -4,6 +4,7 @@ import { Plus, Download, Filter, X } from 'lucide-react';
 import api from '@/lib/api';
 import { formatCurrency, formatDate, toLocalDateString } from '@/lib/utils';
 import { PageHeader, Pagination, SearchInput, LoadingPage, Modal } from '@/components/ui';
+import { useAuthStore } from '@/store/authStore';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import toast from 'react-hot-toast';
 
@@ -24,6 +25,9 @@ const PAYMENT_METHOD_BADGE: Record<string, string> = {
 };
 
 export function ExpensesPage() {
+  const { hasPermission } = useAuthStore();
+  const canManage = hasPermission('expenses.manage');
+
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [byCategory, setByCategory] = useState<Array<{ name: string; total: number; color?: string }>>([]);
@@ -72,7 +76,9 @@ export function ExpensesPage() {
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Expenses" subtitle="Track and manage business expenses">
           <button className="btn-secondary flex items-center gap-1.5 text-sm"><Download size={13} /> Export</button>
-          <button onClick={() => setShowAdd(true)} className="btn-primary flex items-center gap-2 text-sm"><Plus size={14} /> Add Expense</button>
+          {canManage && (
+            <button onClick={() => setShowAdd(true)} className="btn-primary flex items-center gap-2 text-sm"><Plus size={14} /> Add Expense</button>
+          )}
         </PageHeader>
 
         {/* Stats */}

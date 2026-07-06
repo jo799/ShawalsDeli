@@ -3,6 +3,7 @@ import { Plus, Download, Eye, MoreVertical, Search, X, Printer, Phone } from 'lu
 import api from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { PageHeader, StatusBadge, Pagination, Modal, LoadingPage } from '@/components/ui';
+import { useAuthStore } from '@/store/authStore';
 import toast from 'react-hot-toast';
 
 interface PurchaseOrder {
@@ -33,6 +34,9 @@ const tabStatus: Record<string, string> = {
 };
 
 export default function PurchasesPage() {
+  const { hasPermission } = useAuthStore();
+  const canManage = hasPermission('purchases.manage');
+
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selected, setSelected] = useState<PurchaseOrder | null>(null);
@@ -106,7 +110,9 @@ export default function PurchasesPage() {
         <PageHeader title="Purchases" subtitle="Manage purchase orders and supplier deliveries">
           <button className="btn-secondary flex items-center gap-1.5 text-sm"><Download size={13} /> Import</button>
           <button className="btn-secondary flex items-center gap-1.5 text-sm"><Download size={13} /> Export</button>
-          <button onClick={() => setShowNew(true)} className="btn-primary flex items-center gap-2 text-sm"><Plus size={14} /> New Purchase</button>
+          {canManage && (
+            <button onClick={() => setShowNew(true)} className="btn-primary flex items-center gap-2 text-sm"><Plus size={14} /> New Purchase</button>
+          )}
         </PageHeader>
 
         {/* Stats */}

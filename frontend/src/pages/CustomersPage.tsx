@@ -4,6 +4,7 @@ import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '@/lib/api';
 import { formatCurrency, formatDate, formatTime, getInitials } from '@/lib/utils';
 import { PageHeader, StatusBadge, Pagination, Modal, LoadingPage } from '@/components/ui';
+import { useAuthStore } from '@/store/authStore';
 import toast from 'react-hot-toast';
 
 interface Customer {
@@ -25,6 +26,9 @@ const TIER_COLORS: Record<string, string> = {
 };
 
 export default function CustomersPage() {
+  const { hasPermission } = useAuthStore();
+  const canManage = hasPermission('customers.manage');
+
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selected, setSelected] = useState<Customer | null>(null);
   const [activeTab, setActiveTab] = useState('Overview');
@@ -77,9 +81,11 @@ export default function CustomersPage() {
             <input value={search} onChange={e => setSearch(e.target.value)} className="input pl-9 w-64"
               placeholder="Search customers..." />
           </div>
-          <button onClick={() => setShowAdd(true)} className="btn-primary flex items-center gap-2 text-sm">
-            <Plus size={14} /> Add Customer
-          </button>
+          {canManage && (
+            <button onClick={() => setShowAdd(true)} className="btn-primary flex items-center gap-2 text-sm">
+              <Plus size={14} /> Add Customer
+            </button>
+          )}
         </PageHeader>
 
         {/* Customer table */}
