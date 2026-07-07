@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Filter, Edit2, ArrowLeftRight, Trash2, X, RefreshCw } from 'lucide-react';
+import { Plus, Search, Filter, Edit2, ArrowLeftRight, Trash2, X, RefreshCw, Wheat, Beef, Droplet, Carrot, Flame, Cookie, Milk, Package, ShoppingCart, XCircle, Shuffle, Settings2, Wallet, AlertTriangle } from 'lucide-react';
 import api from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { PageHeader, Pagination, Modal, LoadingPage } from '@/components/ui';
@@ -25,9 +25,17 @@ const STOCK_STATUS_BADGE: Record<string, string> = {
   out_of_stock: 'bg-status-error/10 text-status-error border border-status-error/20',
 };
 
-const CATEGORY_ICONS: Record<string, string> = {
-  Grains: '🌾', Meat: '🥩', Oils: '🫙', Vegetables: '🥬',
-  Spices: '🌶️', Baking: '🧁', Dairy: '🥛', Others: '📦',
+// Real icon components instead of emoji — each category maps to a proper
+// lucide icon, with Package as the fallback for anything not in this list
+// (category is free text now, so a custom category like "Beverages" falls
+// through to the generic icon rather than breaking).
+const CATEGORY_ICONS: Record<string, typeof Package> = {
+  Grains: Wheat, Meat: Beef, Oils: Droplet, Vegetables: Carrot,
+  Spices: Flame, Baking: Cookie, Dairy: Milk, Others: Package,
+};
+const CategoryIcon = ({ category, size = 16 }: { category?: string; size?: number }) => {
+  const Icon = (category && CATEGORY_ICONS[category]) || Package;
+  return <Icon size={size} />;
 };
 
 export default function InventoryPage() {
@@ -210,13 +218,13 @@ export default function InventoryPage() {
         {/* Stats */}
         <div className="grid grid-cols-4 gap-4 mb-5">
           {[
-            { label: 'Total Items', value: stats.total_items, icon: '📦', sub: 'All inventory items', color: 'text-text-primary' },
-            { label: 'Total Stock Value', value: formatCurrency(stats.total_value || 0), icon: '💰', sub: 'Current inventory value', color: 'text-brand' },
-            { label: 'Low Stock Items', value: stats.low_stock, icon: '⚠️', sub: 'Items running low', color: 'text-status-warning' },
-            { label: 'Out of Stock', value: stats.out_of_stock, icon: '❌', sub: 'Items out of stock', color: 'text-status-error' },
+            { label: 'Total Items', value: stats.total_items, Icon: Package, sub: 'All inventory items', color: 'text-text-primary' },
+            { label: 'Total Stock Value', value: formatCurrency(stats.total_value || 0), Icon: Wallet, sub: 'Current inventory value', color: 'text-brand' },
+            { label: 'Low Stock Items', value: stats.low_stock, Icon: AlertTriangle, sub: 'Items running low', color: 'text-status-warning' },
+            { label: 'Out of Stock', value: stats.out_of_stock, Icon: XCircle, sub: 'Items out of stock', color: 'text-status-error' },
           ].map(s => (
             <div key={s.label} className="card p-4 flex items-start gap-3">
-              <div className="w-10 h-10 bg-surface-50 rounded-lg flex items-center justify-center text-lg shrink-0">{s.icon}</div>
+              <div className={`w-10 h-10 bg-surface-50 rounded-lg flex items-center justify-center shrink-0 ${s.color}`}><s.Icon size={18} /></div>
               <div>
                 <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
                 <p className="text-xs text-text-muted">{s.label}</p>
@@ -265,8 +273,8 @@ export default function InventoryPage() {
                       className={`table-row cursor-pointer ${selected?.id === item.id ? 'bg-brand/5 border-l-2 border-l-brand' : ''}`}>
                       <td className="table-cell">
                         <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 bg-surface-50 rounded-lg flex items-center justify-center text-base shrink-0">
-                            {CATEGORY_ICONS[item.category || ''] || '📦'}
+                          <div className="w-8 h-8 bg-surface-50 rounded-lg flex items-center justify-center text-brand shrink-0">
+                            <CategoryIcon category={item.category} size={16} />
                           </div>
                           <div>
                             <p className="font-medium text-sm">{item.name}</p>
@@ -320,8 +328,8 @@ export default function InventoryPage() {
           </div>
           <div className="p-4">
             <div className="flex items-center gap-2 mb-4">
-              <div className="w-12 h-12 bg-surface-50 rounded-xl flex items-center justify-center text-2xl">
-                {CATEGORY_ICONS[selected.category || ''] || '📦'}
+              <div className="w-12 h-12 bg-surface-50 rounded-xl flex items-center justify-center text-brand">
+                <CategoryIcon category={selected.category} size={22} />
               </div>
               <div>
                 <div className="flex items-center gap-2">
@@ -381,8 +389,8 @@ export default function InventoryPage() {
                 <p className="text-xs text-text-muted">No recent activity</p>
               ) : activity.map(act => (
                 <div key={act.id} className="flex items-start gap-2">
-                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs shrink-0 ${act.quantity_change > 0 ? 'bg-status-success/10 text-status-success' : 'bg-status-error/10 text-status-error'}`}>
-                    {act.type === 'purchase' ? '📦' : act.type === 'sale' ? '🛒' : act.type === 'waste' ? '🗑️' : act.type === 'transfer' ? '↔️' : '⚙'}
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${act.quantity_change > 0 ? 'bg-status-success/10 text-status-success' : 'bg-status-error/10 text-status-error'}`}>
+                    {act.type === 'purchase' ? <ShoppingCart size={13} /> : act.type === 'sale' ? <Package size={13} /> : act.type === 'waste' ? <XCircle size={13} /> : act.type === 'transfer' ? <Shuffle size={13} /> : <Settings2 size={13} />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium capitalize">{act.type.replace('_',' ')}</p>
@@ -404,8 +412,8 @@ export default function InventoryPage() {
         {selected && (
           <div className="space-y-4">
             <div className="card p-3 flex items-center gap-3">
-              <div className="w-10 h-10 bg-surface-50 rounded-lg flex items-center justify-center text-xl">
-                {CATEGORY_ICONS[selected.category || ''] || '📦'}
+              <div className="w-10 h-10 bg-surface-50 rounded-lg flex items-center justify-center text-brand">
+                <CategoryIcon category={selected.category} size={18} />
               </div>
               <div>
                 <p className="font-semibold">{selected.name}</p>

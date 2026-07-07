@@ -66,17 +66,6 @@ export default function OrdersPage() {
   useEffect(() => { fetchOrders(); }, [activeTab, page]);
   useEffect(() => { const t = setTimeout(fetchOrders, 400); return () => clearTimeout(t); }, [search]);
 
-  // Same print pattern POSPage uses: load the full order into state, and a
-  // short delay after it renders, fire the browser print dialog. Kept
-  // duplicated here (rather than importing a hook) since it's four lines
-  // and tying it to this page's own receiptOrder state is simpler than
-  // threading a shared hook through two unrelated pages.
-  useEffect(() => {
-    if (!receiptOrder) return;
-    const t = setTimeout(() => window.print(), 150);
-    return () => clearTimeout(t);
-  }, [receiptOrder]);
-
   const printReceipt = async (orderId: string) => {
     try {
       const { data } = await api.get(`/orders/${orderId}`);

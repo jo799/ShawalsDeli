@@ -321,10 +321,13 @@ export const createReservation = async (req: AuthRequest, res: Response): Promis
       return;
     }
 
+    const durationSetting = await query("SELECT value FROM settings WHERE key = 'default_reservation_duration_minutes'");
+    const durationMinutes = parseInt(durationSetting.rows[0]?.value) || 90;
+
     const result = await query(`
-      INSERT INTO reservations (table_id, customer_id, customer_name, customer_phone, guests, reservation_time, notes, created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *
-    `, [table_id, customer_id || null, String(customer_name).trim(), customer_phone || null, guestCount, resTime, notes || null, req.user!.id]);
+      INSERT INTO reservations (table_id, customer_id, customer_name, customer_phone, guests, reservation_time, duration_minutes, notes, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *
+    `, [table_id, customer_id || null, String(customer_name).trim(), customer_phone || null, guestCount, resTime, durationMinutes, notes || null, req.user!.id]);
 
     // Only flip the table's LIVE status if the reservation is for today and
     // the table is currently free. Without this check, booking a table for

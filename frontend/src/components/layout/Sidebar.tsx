@@ -1,10 +1,11 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingCart, ClipboardList, ChefHat, Table2,
-  UtensilsCrossed, Package, ShoppingBag, Users, Star, CreditCard,
-  BarChart3, Receipt, UserSquare2, Calendar, Settings, LogOut, ChevronDown
+  UtensilsCrossed, Package, ShoppingBag, Users, Star,
+  BarChart3, Receipt, UserSquare2, Calendar, Settings, LogOut, ChevronDown, Sun, Moon
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
+import { useThemeStore } from '@/store/themeStore';
 import { getInitials } from '@/lib/utils';
 
 const NAV = [
@@ -20,7 +21,6 @@ const NAV = [
   { section: 'CUSTOMERS' },
   { label: 'Customers', icon: Users, to: '/customers' },
   { label: 'Loyalty Points', icon: Star, to: '/loyalty' },
-  { label: 'Credit Accounts', icon: CreditCard, to: '/credits' },
   { section: 'FINANCE' },
   { label: 'Reports', icon: BarChart3, to: '/reports' },
   { label: 'Expenses', icon: Receipt, to: '/expenses' },
@@ -31,51 +31,19 @@ const NAV = [
   { label: 'Settings', icon: Settings, to: '/settings' },
 ];
 
-function ShawalsLogo() {
-  return (
-    <svg viewBox="0 0 120 60" className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
-      {/* Serving tray hand */}
-      <g transform="translate(4,4)">
-        {/* Hand / arm */}
-        <path d="M18 44 L22 52 L28 50 L26 38 Z" fill="#F59E0B"/>
-        {/* Tray base */}
-        <rect x="10" y="36" width="32" height="3" rx="1.5" fill="#F59E0B"/>
-        {/* Tray left curve */}
-        <path d="M10 37 Q8 37 8 39" stroke="#F59E0B" strokeWidth="1.5" fill="none"/>
-        {/* Tray right curve */}
-        <path d="M42 37 Q44 37 44 39" stroke="#F59E0B" strokeWidth="1.5" fill="none"/>
-        {/* Cloche dome */}
-        <path d="M12 36 Q13 18 26 16 Q39 18 40 36 Z" fill="#F59E0B"/>
-        {/* Cloche knob */}
-        <circle cx="26" cy="16" r="2" fill="#F59E0B"/>
-        {/* Steam wisps */}
-        <path d="M20 12 Q18 8 20 4" stroke="#F59E0B" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
-        <path d="M26 10 Q24 5 26 1" stroke="#F59E0B" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
-        {/* Highlight on dome */}
-        <path d="M15 30 Q16 22 22 20" stroke="rgba(0,0,0,0.15)" strokeWidth="2" fill="none" strokeLinecap="round"/>
-      </g>
-      {/* Text: Shawal's */}
-      <text x="52" y="28" fontFamily="Georgia, serif" fontStyle="italic" fontSize="13" fontWeight="700" fill="#F59E0B" letterSpacing="0.5">Shawal's</text>
-      {/* Text: DELI */}
-      <text x="56" y="42" fontFamily="Arial, sans-serif" fontSize="11" fontWeight="900" fill="#F59E0B" letterSpacing="2">DELI</text>
-      {/* Text: Swahili Dishes */}
-      <text x="51" y="52" fontFamily="Arial, sans-serif" fontSize="6.5" fill="#D4A017" letterSpacing="0.5">Swahili Dishes</text>
-    </svg>
-  );
-}
-
 export default function Sidebar() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
   const handleLogout = () => { logout(); navigate('/login'); };
+  const { theme, toggleTheme } = useThemeStore();
 
   return (
     <aside className="w-[185px] shrink-0 bg-surface-nav h-screen flex flex-col border-r border-border overflow-y-auto">
-      {/* Logo */}
+      {/* Logo — the real brand asset (frontend/public/logo.png), not a
+          hand-drawn approximation. object-contain keeps its true proportions
+          rather than stretching it to fill the box. */}
       <div className="px-3 py-3 border-b border-border">
-        <div className="w-full h-[58px]">
-          <ShawalsLogo />
-        </div>
+        <img src="/logo.png" alt="Shawal's Deli" className="w-full h-[58px] object-contain" />
       </div>
 
       {/* Navigation */}
@@ -101,6 +69,18 @@ export default function Sidebar() {
 
       {/* User */}
       <div className="p-3 border-t border-border">
+        <button
+          onClick={toggleTheme}
+          className="w-full flex items-center justify-between gap-2 px-2 py-2 mb-1 text-xs text-text-secondary hover:bg-surface-50 hover:text-text-primary rounded-lg transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            {theme === 'dark' ? <Moon size={13} /> : <Sun size={13} />}
+            {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
+          </span>
+          <span className={`w-8 h-4 rounded-full relative transition-colors ${theme === 'light' ? 'bg-brand' : 'bg-surface-100'}`}>
+            <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${theme === 'light' ? 'translate-x-4' : 'translate-x-0.5'}`} />
+          </span>
+        </button>
         <div className="w-full flex items-center gap-2 hover:bg-surface-50 rounded-lg p-2 transition-colors group cursor-pointer">
           <div className="w-8 h-8 bg-brand rounded-full flex items-center justify-center text-black text-xs font-bold shrink-0">
             {user ? getInitials(user.full_name) : 'JK'}

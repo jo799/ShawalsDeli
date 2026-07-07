@@ -4,6 +4,9 @@ import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
 import AppLayout from '@/components/layout/AppLayout';
 import LoginPage from '@/pages/LoginPage';
+import SignupPage from '@/pages/SignupPage';
+import ForgotPasswordPage from '@/pages/ForgotPasswordPage';
+import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import DashboardPage from '@/pages/DashboardPage';
 import POSPage from '@/pages/POSPage';
 import OrdersPage from '@/pages/OrdersPage';
@@ -43,6 +46,9 @@ export default function App() {
         />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
             <Route index element={<DashboardPage />} />
             <Route path="pos" element={<POSPage />} />
@@ -54,7 +60,6 @@ export default function App() {
             <Route path="purchases" element={<PurchasesPage />} />
             <Route path="customers" element={<CustomersPage />} />
             <Route path="loyalty" element={<LoyaltyPage />} />
-            <Route path="credits" element={<Navigate to="/customers" replace />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="expenses" element={<ExpensesPage />} />
             <Route path="staff" element={<StaffPage />} />

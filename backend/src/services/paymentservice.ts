@@ -31,7 +31,7 @@ export type ApplyPaymentOutcome =
   | { found: true; applied: false; reason: 'cancelled' | 'already_paid' | 'exceeds_balance'; order: Record<string, unknown>; balanceRemaining: number }
   | {
       found: true; applied: true; order: Record<string, unknown>; isFullyPaid: boolean;
-      balanceRemaining: number; newlyCompleted: boolean; stockWarnings: StockShortfall[];
+      balanceRemaining: number; newlyCompleted: boolean; stockWarnings: StockShortfall[]; pointsAwarded: number;
     };
 
 /**
@@ -51,7 +51,9 @@ export const applyPaymentToOrder = async (
   client: PoolClient,
   orderId: string,
   amount: number,
-  performedBy: string | null
+  performedBy: string | null,
+  awardLoyalty: boolean = true,
+  currentPointsTenderAmount: number = 0
 ): Promise<ApplyPaymentOutcome> => {
   const orderRes = await client.query('SELECT * FROM orders WHERE id = $1 FOR UPDATE', [orderId]);
   if (orderRes.rows.length === 0) {
@@ -135,9 +137,30 @@ export const applyPaymentToOrder = async (
   // from any single tender. This is what makes a mixed cash+M-Pesa payment
   // award the same points a single-method payment would: once, correctly,
   // regardless of how many separate payments it took to get there.
+  //
+  // awardLoyalty is a per-transaction choice made at checkout (defaults to
+  // true, preserving the original always-award behavior for any caller that
+  // doesn't pass it) — a cashier can opt a specific sale out, e.g. a staff
+  // discount or an already-discounted bulk order where earning points on
+  // top wasn't intended.
   const justBecameFullyPaid = isFullyPaid && currentPaid < total - 0.01;
-  if (justBecameFullyPaid && updatedOrder.customer_id) {
-    const points = Math.floor(Math.round(total * 100) / 1000); // 1000 cents = KES 10 = 1 point
+  let pointsAwarded = 0;
+  if (justBecameFullyPaid && updatedOrder.customer_id && awardLoyalty) {
+    // Points earned are based on how much was actually paid with real
+    // money, not the order's raw total — otherwise a customer who covers
+    // part of a bill by redeeming points would earn NEW points back on the
+    // very money those points stood in for, letting the balance inflate
+    // itself on repeat visits. Whatever was tendered as 'points' — from
+    // earlier payments already recorded, PLUS the current one being applied
+    // right now (its own payments row isn't inserted until after this
+    // function returns, so a query here wouldn't see it yet) — is
+    // subtracted out of the earning basis first.
+    const pointsTenderRes = await client.query(
+      `SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE order_id = $1 AND payment_method = 'points' AND status = 'completed'`,
+      [orderId]
+    );
+    const earningBasis = Math.max(0, total - Number(pointsTenderRes.rows[0].total) - currentPointsTenderAmount);
+    const points = Math.floor(Math.round(earningBasis * 100) / 1000); // 1000 cents = KES 10 = 1 point
     if (points > 0) {
       await client.query(
         `INSERT INTO loyalty_points (customer_id, total_points, available_points)
@@ -153,6 +176,7 @@ export const applyPaymentToOrder = async (
          VALUES ($1, 'earn', $2, $3, $4, $5)`,
         [updatedOrder.customer_id, points, `Points earned for order ${updatedOrder.order_number}`, orderId, performedBy]
       );
+      pointsAwarded = points;
     }
   }
 
@@ -164,5 +188,6 @@ export const applyPaymentToOrder = async (
     balanceRemaining: Math.max(0, Math.round((total - newAmountPaid) * 100) / 100),
     newlyCompleted: willCompleteNow,
     stockWarnings: deduction.shortfalls,
+    pointsAwarded,
   };
 };

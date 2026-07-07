@@ -25,6 +25,13 @@ const createTables = async () => {
         password_hash VARCHAR(255) NOT NULL,
         role VARCHAR(50) NOT NULL DEFAULT 'waiter' CHECK (role IN ('administrator','manager','head_chef','cashier','waiter','kitchen_staff','cleaner')),
         status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive','on_leave')),
+        -- Account approval gate, separate from 'status' above (which is a
+        -- work-schedule state — active/on_leave/inactive — not whether the
+        -- account itself is allowed to log in at all). Admin-created staff
+        -- (via the Staff page) are auto-approved; only self-service signups
+        -- start as 'pending' and are blocked from logging in until an admin
+        -- approves them.
+        approval_status VARCHAR(20) NOT NULL DEFAULT 'approved' CHECK (approval_status IN ('pending','approved','rejected')),
         schedule_type VARCHAR(20) DEFAULT 'full_time' CHECK (schedule_type IN ('full_time','part_time')),
         avatar_url VARCHAR(500),
         joined_date DATE DEFAULT CURRENT_DATE,
@@ -73,6 +80,12 @@ const createTables = async () => {
         track_stock BOOLEAN NOT NULL DEFAULT false,
         stock_quantity INTEGER NOT NULL DEFAULT 0,
         reorder_level INTEGER NOT NULL DEFAULT 5,
+        -- For POS "Scan" — matched against what a USB barcode scanner types
+        -- (they act as keyboard input, typing the code then Enter, not a
+        -- camera/image-based scan). NULL for items with no assigned code;
+        -- UNIQUE only enforces uniqueness among the non-null values, so
+        -- multiple items can stay unset simultaneously.
+        barcode VARCHAR(100) UNIQUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
@@ -440,7 +453,7 @@ const createTables = async () => {
       CREATE TABLE IF NOT EXISTS payments (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         order_id UUID REFERENCES orders(id) ON DELETE SET NULL,
-        payment_method VARCHAR(30) NOT NULL CHECK (payment_method IN ('cash','mpesa','card','split')),
+        payment_method VARCHAR(30) NOT NULL CHECK (payment_method IN ('cash','mpesa','card','split','points')),
         amount DECIMAL(10,2) NOT NULL CHECK (amount > 0),
         status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending','completed','failed','cancelled','expired','refunded')),
         reference VARCHAR(100) UNIQUE,
@@ -451,6 +464,19 @@ const createTables = async () => {
         result_desc TEXT,
         split_details JSONB,
         expires_at TIMESTAMP,
+        -- Cash/card payments apply loyalty immediately (see processPayment),
+        -- so the choice and the effect happen in the same request. M-Pesa
+        -- can't do that — the STK push is initiated now, but the payment
+        -- only actually completes later when Safaricom's callback (or the
+        -- status poll) fires, quite possibly seconds to minutes afterward.
+        -- This column is where that earlier choice waits until then.
+        award_loyalty BOOLEAN NOT NULL DEFAULT true,
+        -- Only set when payment_method='points'. Recorded here (not just
+        -- derived from amount / current point value) because the point
+        -- value is itself a setting that can change later — this keeps the
+        -- receipt and the payments ledger showing exactly what was redeemed
+        -- at the time, regardless of any rate change afterward.
+        points_redeemed INTEGER,
         processed_by UUID REFERENCES users(id) ON DELETE SET NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -544,6 +570,44 @@ const createTables = async () => {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // =====================
+    // SETTINGS
+    // =====================
+    // Key-value rather than rigid columns — General and Business Profile
+    // settings are a loose, evolving bag of small preferences (language,
+    // currency display, business contact details, logo URL), not a
+    // relational structure with its own meaningful joins. A fixed-column
+    // table would need a migration every time a new setting is added; this
+    // doesn't.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS settings (
+        key VARCHAR(100) PRIMARY KEY,
+        value TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_by UUID REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+
+    // =====================
+    // PASSWORD RESETS
+    // =====================
+    // Only the HASH of the reset token is ever stored — the raw token only
+    // ever exists in the emailed link itself and in the requester's memory
+    // for the few minutes it takes to click it. This mirrors how passwords
+    // themselves are handled (bcrypt hash only) and means a database leak
+    // alone can't be used to forge a password reset.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS password_resets (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash VARCHAR(64) UNIQUE NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        used_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id)`);
 
     // =====================
     // STAFF SCHEDULING
@@ -667,6 +731,19 @@ const createTables = async () => {
     await client.query(`ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true`);
     await client.query(`ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true`);
 
+    // Account approval gate. Existing users (all admin-created up to this
+    // point) default to 'approved' so this change never locks anyone
+    // currently in the system out.
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) NOT NULL DEFAULT 'approved'`);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_approval_status_check') THEN
+          ALTER TABLE users ADD CONSTRAINT users_approval_status_check CHECK (approval_status IN ('pending','approved','rejected'));
+        END IF;
+      END $$;
+    `);
+
     // Fix for the reservation day-boundary bug: convert reservation_time from
     // a naive TIMESTAMP to TIMESTAMPTZ on existing databases. Guarded so this
     // only ever runs once — re-interpreting an already-correct TIMESTAMPTZ
@@ -767,6 +844,28 @@ const createTables = async () => {
             ALTER TABLE payments ADD CONSTRAINT payments_reference_key UNIQUE (reference);
           EXCEPTION WHEN unique_violation THEN
             RAISE NOTICE 'Skipping UNIQUE(reference) on payments — existing duplicate references found. Clean up manually, then re-run migration.';
+          END;
+        END IF;
+      END $$;
+    `);
+
+    await client.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS award_loyalty BOOLEAN NOT NULL DEFAULT true`);
+    await client.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS points_redeemed INTEGER`);
+    // Existing installations already have the old CHECK constraint baked in
+    // (changing the CREATE TABLE statement above only affects brand new
+    // databases) — drop and recreate it with 'points' included.
+    await client.query(`ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_payment_method_check`);
+    await client.query(`ALTER TABLE payments ADD CONSTRAINT payments_payment_method_check CHECK (payment_method IN ('cash','mpesa','card','split','points'))`);
+
+    await client.query(`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS barcode VARCHAR(100)`);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'menu_items_barcode_key') THEN
+          BEGIN
+            ALTER TABLE menu_items ADD CONSTRAINT menu_items_barcode_key UNIQUE (barcode);
+          EXCEPTION WHEN unique_violation THEN
+            RAISE NOTICE 'Skipping UNIQUE(barcode) on menu_items — existing duplicate barcodes found. Clean up manually, then re-run migration.';
           END;
         END IF;
       END $$;

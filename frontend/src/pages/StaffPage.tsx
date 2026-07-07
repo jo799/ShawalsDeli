@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Plus, Download, Search, Filter, RefreshCw, MoreVertical, UserPlus, Shield } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Plus, Search, RefreshCw, MoreVertical, UserPlus, Shield, Users, UserCheck, UserMinus, Wallet, Check, X, Edit2, KeyRound, UserX, UserCheck2 } from 'lucide-react';
 import api from '@/lib/api';
 import { formatDate, getInitials, toLocalDateString } from '@/lib/utils';
+import { useAuthStore } from '@/store/authStore';
 import { PageHeader, StatusBadge, Pagination, Modal, LoadingPage } from '@/components/ui';
 import toast from 'react-hot-toast';
 
@@ -9,6 +10,9 @@ interface StaffMember {
   id: string; full_name: string; email: string; phone?: string;
   role: string; status: string; schedule_type: string;
   avatar_url?: string; joined_date?: string; last_login?: string;
+}
+interface PendingUser {
+  id: string; full_name: string; email: string; phone?: string; created_at: string;
 }
 
 const ROLE_BADGE: Record<string, string> = {
@@ -28,7 +32,34 @@ const ROLE_LABEL: Record<string, string> = {
 
 const ROLES = ['administrator','manager','head_chef','cashier','waiter','kitchen_staff','cleaner'];
 
+// What each role can actually access right now — fixed in how the system is
+// built, not a configurable permissions matrix. Same real breakdown shown
+// in Settings > Users & Permissions; kept here too since "Manage Roles" is
+// where people look for it from this page specifically.
+const ROLE_ACCESS: Array<{ role: string; access: boolean[] }> = [
+  { role: 'Administrator', access: [true, true, true, true, true, true, true] },
+  { role: 'Manager', access: [true, true, true, true, true, true, true] },
+  { role: 'Head Chef', access: [true, false, true, true, false, false, false] },
+  { role: 'Cashier', access: [true, true, true, false, false, false, false] },
+  { role: 'Waiter', access: [true, true, true, false, false, false, false] },
+  { role: 'Kitchen Staff', access: [true, false, true, false, false, false, false] },
+  { role: 'Cleaner', access: [true, false, false, false, false, false, false] },
+];
+const ROLE_ACCESS_COLUMNS = ['Dashboard','POS','Orders','Inventory','Reports','Staff','Settings'];
+
+function randomPassword(): string {
+  // Real random default instead of a fixed, guessable string that would
+  // otherwise sit right there in the form for anyone to see and reuse.
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < 10; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
+
+const EMPTY_FORM = { full_name: '', email: '', phone: '', role: 'waiter', schedule_type: 'full_time', joined_date: toLocalDateString(), password: randomPassword() };
+
 export default function StaffPage() {
+  const { user: currentUser } = useAuthStore();
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [stats, setStats] = useState({ total: 0, active: 0, on_leave: 0, inactive: 0 });
   const [roleDistrib, setRoleDistrib] = useState<Array<{ role: string; count: number }>>([]);
@@ -39,34 +70,34 @@ export default function StaffPage() {
   const [pagination, setPagination] = useState({ total: 0, pages: 1 });
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({
-    full_name: '', email: '', phone: '', role: 'waiter',
-    schedule_type: 'full_time', joined_date: toLocalDateString(), password: 'password123'
-  });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
+  const [decidingId, setDecidingId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [showRolesModal, setShowRolesModal] = useState(false);
+  const [resetPwMember, setResetPwMember] = useState<StaffMember | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [resettingPw, setResettingPw] = useState(false);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  // Upcoming birthdays (mock)
-  const birthdays = [
-    { name: 'Alice Wanjiku', role: 'Cashier', when: 'In 3 days', date: 'May 28' },
-    { name: 'Brian Otieno', role: 'Waiter', when: 'In 8 days', date: 'June 2' },
-    { name: 'Sarah Ndungu', role: 'Waiter', when: 'In 21 days', date: 'June 15' },
-  ];
+  const fetchPending = useCallback(async () => {
+    try {
+      const { data } = await api.get('/staff', { params: { approval_status: 'pending', limit: 50 } });
+      setPendingUsers(data.data);
+    } catch { /* non-critical for the main staff list */ }
+  }, []);
 
   const fetchStaff = useCallback(async () => {
     try {
       setLoading(true);
       const { data } = await api.get('/staff', {
-        params: {
-          role: roleFilter || undefined,
-          status: statusFilter || undefined,
-          search: search || undefined,
-          page, limit: 10
-        }
+        params: { role: roleFilter || undefined, status: statusFilter || undefined, search: search || undefined, page, limit: 10 }
       });
       setStaff(data.data);
       setStats(data.stats);
       setPagination({ total: data.pagination.total, pages: data.pagination.pages });
-
-      // Compute role distribution
       const counts: Record<string, number> = {};
       data.data.forEach((s: StaffMember) => { counts[s.role] = (counts[s.role] || 0) + 1; });
       setRoleDistrib(Object.entries(counts).map(([role, count]) => ({ role, count })));
@@ -75,19 +106,89 @@ export default function StaffPage() {
   }, [search, roleFilter, statusFilter, page]);
 
   useEffect(() => { fetchStaff(); }, [fetchStaff]);
+  useEffect(() => { fetchPending(); }, [fetchPending]);
   useEffect(() => { const t = setTimeout(fetchStaff, 400); return () => clearTimeout(t); }, [search]);
 
-  const createStaff = async () => {
-    if (!form.full_name || !form.email) { toast.error('Name and email are required'); return; }
+  useEffect(() => {
+    const closeMenu = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpenMenuId(null); };
+    document.addEventListener('click', closeMenu);
+    return () => document.removeEventListener('click', closeMenu);
+  }, []);
+
+  const openAdd = () => { setEditingId(null); setForm({ ...EMPTY_FORM, password: randomPassword(), joined_date: toLocalDateString() }); setShowAdd(true); };
+
+  const openEdit = (m: StaffMember) => {
+    setEditingId(m.id);
+    setForm({ full_name: m.full_name, email: m.email, phone: m.phone || '', role: m.role, schedule_type: m.schedule_type || 'full_time', joined_date: m.joined_date || toLocalDateString(), password: '' });
+    setShowAdd(true);
+    setOpenMenuId(null);
+  };
+
+  const saveStaff = async () => {
+    if (!form.full_name.trim() || !form.email.trim()) { toast.error('Name and email are required'); return; }
+    if (!editingId && form.password.length < 8) { toast.error('Password must be at least 8 characters'); return; }
+    setSaving(true);
     try {
-      await api.post('/staff', form);
-      toast.success('Staff member added');
+      if (editingId) {
+        await api.put(`/staff/${editingId}`, form);
+        toast.success('Staff member updated');
+      } else {
+        await api.post('/staff', form);
+        toast.success('Staff member added');
+      }
       setShowAdd(false);
-      setForm({ full_name: '', email: '', phone: '', role: 'waiter', schedule_type: 'full_time', joined_date: toLocalDateString(), password: 'password123' });
       fetchStaff();
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to add staff';
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to save staff member';
       toast.error(msg);
+    } finally { setSaving(false); }
+  };
+
+  const toggleActive = async (m: StaffMember) => {
+    setOpenMenuId(null);
+    const nextStatus = m.status === 'inactive' ? 'active' : 'inactive';
+    if (nextStatus === 'inactive' && !confirm(`Deactivate ${m.full_name}? They won't be able to log in until reactivated.`)) return;
+    try {
+      await api.put(`/staff/${m.id}`, { full_name: m.full_name, email: m.email, phone: m.phone, role: m.role, schedule_type: m.schedule_type, status: nextStatus });
+      toast.success(nextStatus === 'inactive' ? `${m.full_name} deactivated` : `${m.full_name} reactivated`);
+      fetchStaff();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update status';
+      toast.error(msg);
+    }
+  };
+
+  const submitResetPassword = async () => {
+    if (!resetPwMember) return;
+    if (newPassword.length < 8) { toast.error('Password must be at least 8 characters'); return; }
+    setResettingPw(true);
+    try {
+      await api.put(`/staff/${resetPwMember.id}/reset-password`, { password: newPassword });
+      toast.success(`Password reset for ${resetPwMember.full_name}`);
+      setResetPwMember(null); setNewPassword('');
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to reset password';
+      toast.error(msg);
+    } finally { setResettingPw(false); }
+  };
+
+  // Approving assigns the default 'waiter' role for now — an admin can
+  // change it afterward from the main staff table like any other edit.
+  // Rejecting just leaves the account permanently unable to log in; it
+  // isn't deleted, so there's a record of the request having existed.
+  const decideApproval = async (user: PendingUser, decision: 'approved' | 'rejected') => {
+    if (decision === 'rejected' && !confirm(`Decline ${user.full_name}'s request? They will not be able to log in.`)) return;
+    setDecidingId(user.id);
+    try {
+      const res = await api.put(`/staff/${user.id}/approval`, { approval_status: decision });
+      toast.success(res.data.message || (decision === 'approved' ? 'Approved' : 'Declined'));
+      fetchPending();
+      if (decision === 'approved') fetchStaff();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update this request';
+      toast.error(msg);
+    } finally {
+      setDecidingId(null);
     }
   };
 
@@ -97,8 +198,7 @@ export default function StaffPage() {
     <div className="flex h-full overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Staff" subtitle="Manage your team members, roles and permissions">
-          <button className="btn-secondary flex items-center gap-1.5 text-sm"><Download size={13} /> Export</button>
-          <button onClick={() => setShowAdd(true)} className="btn-primary flex items-center gap-2 text-sm">
+          <button onClick={openAdd} className="btn-primary flex items-center gap-2 text-sm">
             <Plus size={14} /> Add Staff
           </button>
         </PageHeader>
@@ -106,14 +206,14 @@ export default function StaffPage() {
         {/* Stats cards */}
         <div className="grid grid-cols-5 gap-3 mb-5">
           {[
-            { label: 'Total Staff', value: stats.total, icon: '👥', sub: 'Active team members', color: 'text-text-primary' },
-            { label: 'Active Staff', value: stats.active, icon: '✅', sub: 'Currently working', color: 'text-status-success' },
-            { label: 'On Leave', value: stats.on_leave, icon: '🏖️', sub: 'Not working today', color: 'text-status-warning' },
-            { label: 'Roles', value: 6, icon: '🛡️', sub: 'System roles', color: 'text-status-purple' },
-            { label: 'This Month Payroll', value: 'KES 412,850', icon: '💰', sub: 'Total payroll cost', color: 'text-brand' },
+            { label: 'Total Staff', value: stats.total, Icon: Users, sub: 'Active team members', color: 'text-text-primary' },
+            { label: 'Active Staff', value: stats.active, Icon: UserCheck, sub: 'Currently working', color: 'text-status-success' },
+            { label: 'On Leave', value: stats.on_leave, Icon: UserMinus, sub: 'Not working today', color: 'text-status-warning' },
+            { label: 'Roles', value: ROLES.length, Icon: Shield, sub: 'System roles', color: 'text-status-purple' },
+            { label: 'Payroll', value: '—', Icon: Wallet, sub: 'Not tracked yet', color: 'text-text-muted' },
           ].map(s => (
             <div key={s.label} className="card p-3 flex items-start gap-2">
-              <span className="text-xl">{s.icon}</span>
+              <div className={`w-8 h-8 rounded-lg bg-surface-50 flex items-center justify-center shrink-0 ${s.color}`}><s.Icon size={16} /></div>
               <div className="min-w-0">
                 <p className={`text-lg font-bold ${s.color} truncate`}>{s.value}</p>
                 <p className="text-xs text-text-muted">{s.label}</p>
@@ -141,7 +241,6 @@ export default function StaffPage() {
             <option value="inactive">Inactive</option>
           </select>
           <button onClick={fetchStaff} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5"><RefreshCw size={12} /> Refresh</button>
-          <button className="btn-secondary flex items-center gap-1.5 text-xs py-1.5"><Filter size={12} /> Filters</button>
         </div>
 
         {/* Table */}
@@ -186,8 +285,23 @@ export default function StaffPage() {
                       <td className="table-cell text-text-muted text-xs">
                         {member.joined_date ? formatDate(member.joined_date) : '—'}
                       </td>
-                      <td className="table-cell">
-                        <button className="btn-ghost p-1"><MoreVertical size={13} /></button>
+                      <td className="table-cell relative">
+                        <button onClick={e => { e.stopPropagation(); setOpenMenuId(openMenuId === member.id ? null : member.id); }} className="btn-ghost p-1">
+                          <MoreVertical size={13} />
+                        </button>
+                        {openMenuId === member.id && (
+                          <div ref={menuRef} className="absolute right-4 top-10 z-20 bg-surface-card border border-border rounded-xl shadow-modal py-1 w-44">
+                            <button onClick={() => openEdit(member)} className="w-full text-left px-3 py-2 text-xs hover:bg-surface-50 flex items-center gap-2">
+                              <Edit2 size={12} /> Edit
+                            </button>
+                            <button onClick={() => { setResetPwMember(member); setNewPassword(''); setOpenMenuId(null); }} className="w-full text-left px-3 py-2 text-xs hover:bg-surface-50 flex items-center gap-2">
+                              <KeyRound size={12} /> Reset Password
+                            </button>
+                            <button onClick={() => toggleActive(member)} className={`w-full text-left px-3 py-2 text-xs hover:bg-surface-50 flex items-center gap-2 ${member.status === 'inactive' ? 'text-status-success' : 'text-status-error'}`}>
+                              {member.status === 'inactive' ? <><UserCheck2 size={12} /> Reactivate</> : <><UserX size={12} /> Deactivate</>}
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -203,19 +317,16 @@ export default function StaffPage() {
       <div className="w-[260px] shrink-0 border-l border-border bg-surface-card flex flex-col overflow-y-auto p-4 space-y-5">
         {/* Staff Overview donut */}
         <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="section-title text-sm">Staff Overview</h2>
-            <button className="text-xs text-brand">View Report</button>
-          </div>
+          <h2 className="section-title text-sm mb-3">Staff Overview</h2>
           <div className="flex items-center gap-4">
             <div className="relative w-20 h-20 shrink-0">
               <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-                <circle cx="18" cy="18" r="15.9" fill="none" stroke="#1E1E1E" strokeWidth="3" />
+                <circle cx="18" cy="18" r="15.9" fill="none" stroke="rgb(var(--color-surface-100))" strokeWidth="3" />
                 <circle cx="18" cy="18" r="15.9" fill="none" stroke="#10B981" strokeWidth="3"
-                  strokeDasharray={`${stats.total ? (stats.active / stats.total) * 100 : 88} 100`} />
+                  strokeDasharray={`${stats.total ? (stats.active / stats.total) * 100 : 0} 100`} />
                 <circle cx="18" cy="18" r="15.9" fill="none" stroke="#F59E0B" strokeWidth="3"
-                  strokeDasharray={`${stats.total ? (stats.on_leave / stats.total) * 100 : 11} 100`}
-                  strokeDashoffset={`-${stats.total ? (stats.active / stats.total) * 100 : 88}`} />
+                  strokeDasharray={`${stats.total ? (stats.on_leave / stats.total) * 100 : 0} 100`}
+                  strokeDashoffset={`-${stats.total ? (stats.active / stats.total) * 100 : 0}`} />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
                 <span className="text-lg font-bold text-text-primary">{stats.total}</span>
@@ -225,17 +336,14 @@ export default function StaffPage() {
             <div className="space-y-1.5 text-xs">
               <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-status-success" /><span className="text-text-secondary">Active</span><span className="font-bold ml-auto">{stats.active} ({stats.total ? Math.round(stats.active / stats.total * 100) : 0}%)</span></div>
               <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-status-warning" /><span className="text-text-secondary">On Leave</span><span className="font-bold ml-auto">{stats.on_leave} ({stats.total ? Math.round(stats.on_leave / stats.total * 100) : 0}%)</span></div>
-              <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-status-error" /><span className="text-text-secondary">Inactive</span><span className="font-bold ml-auto">{stats.inactive || 0} (0%)</span></div>
+              <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-status-error" /><span className="text-text-secondary">Inactive</span><span className="font-bold ml-auto">{stats.inactive || 0}</span></div>
             </div>
           </div>
         </div>
 
         {/* Role Distribution */}
         <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="section-title text-sm">Role Distribution</h2>
-            <button className="text-xs text-brand">View Report</button>
-          </div>
+          <h2 className="section-title text-sm mb-3">Role Distribution</h2>
           <div className="space-y-2">
             {ROLES.map(role => {
               const count = roleDistrib.find(r => r.role === role)?.count || 0;
@@ -253,37 +361,58 @@ export default function StaffPage() {
           </div>
         </div>
 
-        {/* Upcoming Birthdays */}
+        {/* Pending Approvals — self-service signups awaiting a decision */}
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="section-title text-sm">Upcoming Birthdays</h2>
-            <button className="text-xs text-brand">View All</button>
+            <h2 className="section-title text-sm flex items-center gap-2">
+              Pending Approvals
+              {pendingUsers.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-status-warning/15 text-status-warning text-[10px] font-bold">{pendingUsers.length}</span>
+              )}
+            </h2>
           </div>
-          <div className="space-y-3">
-            {birthdays.map(b => (
-              <div key={b.name} className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-brand/10 flex items-center justify-center text-sm font-bold text-brand shrink-0">
-                  {getInitials(b.name)}
+          {pendingUsers.length === 0 ? (
+            <p className="text-xs text-text-muted">No signup requests waiting.</p>
+          ) : (
+            <div className="space-y-3">
+              {pendingUsers.map(u => (
+                <div key={u.id} className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-full bg-brand/10 flex items-center justify-center text-sm font-bold text-brand shrink-0">
+                    {getInitials(u.full_name)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium truncate">{u.full_name}</p>
+                    <p className="text-[10px] text-text-muted truncate">{u.email}</p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => decideApproval(u, 'approved')}
+                      disabled={decidingId === u.id}
+                      className="w-6 h-6 rounded-lg bg-status-success/10 text-status-success flex items-center justify-center hover:bg-status-success/20 disabled:opacity-40"
+                      title="Approve"
+                    ><Check size={13} /></button>
+                    <button
+                      onClick={() => decideApproval(u, 'rejected')}
+                      disabled={decidingId === u.id}
+                      className="w-6 h-6 rounded-lg bg-status-error/10 text-status-error flex items-center justify-center hover:bg-status-error/20 disabled:opacity-40"
+                      title="Decline"
+                    ><X size={13} /></button>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate">{b.name}</p>
-                  <p className="text-[10px] text-text-muted">{b.role} · {b.date}</p>
-                </div>
-                <span className="text-[10px] text-status-success font-medium">{b.when}</span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Quick Actions */}
         <div>
           <h2 className="section-title text-sm mb-3">Quick Actions</h2>
           <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => setShowAdd(true)} className="btn-secondary flex flex-col items-center gap-1 py-3 text-xs">
+            <button onClick={openAdd} className="btn-secondary flex flex-col items-center gap-1 py-3 text-xs">
               <UserPlus size={16} className="text-brand" />
               Add Staff
             </button>
-            <button className="btn-secondary flex flex-col items-center gap-1 py-3 text-xs">
+            <button onClick={() => setShowRolesModal(true)} className="btn-secondary flex flex-col items-center gap-1 py-3 text-xs">
               <Shield size={16} className="text-status-purple" />
               Manage Roles
             </button>
@@ -291,8 +420,8 @@ export default function StaffPage() {
         </div>
       </div>
 
-      {/* Add Staff Modal */}
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add Staff Member" size="md">
+      {/* Add / Edit Staff Modal */}
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} title={editingId ? 'Edit Staff Member' : 'Add Staff Member'} size="md">
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
@@ -309,7 +438,11 @@ export default function StaffPage() {
             </div>
             <div>
               <label className="block text-xs text-text-muted mb-1">Role *</label>
-              <select className="select" value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}>
+              <select
+                className="select" value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}
+                disabled={editingId === currentUser?.id && currentUser?.role === 'administrator'}
+                title={editingId === currentUser?.id ? "You can't change your own role" : undefined}
+              >
                 {ROLES.map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
               </select>
             </div>
@@ -324,14 +457,76 @@ export default function StaffPage() {
               <label className="block text-xs text-text-muted mb-1">Joined Date</label>
               <input type="date" className="input" value={form.joined_date} onChange={e => setForm(p => ({ ...p, joined_date: e.target.value }))} />
             </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Initial Password</label>
-              <input type="password" className="input" value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))} />
-            </div>
+            {!editingId && (
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Initial Password</label>
+                <div className="flex gap-1.5">
+                  <input className="input flex-1" value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))} />
+                  <button type="button" onClick={() => setForm(p => ({ ...p, password: randomPassword() }))} className="btn-secondary text-xs px-2" title="Generate a new random password">↻</button>
+                </div>
+                <p className="text-[10px] text-text-muted mt-1">Share this with them directly — it won't be shown again.</p>
+              </div>
+            )}
           </div>
           <div className="flex gap-3 pt-2">
             <button onClick={() => setShowAdd(false)} className="btn-secondary flex-1">Cancel</button>
-            <button onClick={createStaff} className="btn-primary flex-1">Add Staff Member</button>
+            <button onClick={saveStaff} disabled={saving} className="btn-primary flex-1 disabled:opacity-50">
+              {saving ? 'Saving…' : editingId ? 'Save Changes' : 'Add Staff Member'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Reset Password Modal */}
+      <Modal open={!!resetPwMember} onClose={() => setResetPwMember(null)} title={`Reset Password — ${resetPwMember?.full_name}`}>
+        <div className="space-y-4">
+          <p className="text-xs text-text-muted">Sets a new password directly — different from the self-service "forgot password" email flow. Share the new password with them yourself.</p>
+          <div>
+            <label className="block text-xs text-text-muted mb-1">New Password</label>
+            <div className="flex gap-1.5">
+              <input className="input flex-1" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="At least 8 characters" />
+              <button type="button" onClick={() => setNewPassword(randomPassword())} className="btn-secondary text-xs px-2" title="Generate a random password">↻</button>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <button onClick={() => setResetPwMember(null)} className="btn-secondary flex-1">Cancel</button>
+            <button onClick={submitResetPassword} disabled={resettingPw} className="btn-primary flex-1 disabled:opacity-50">
+              {resettingPw ? 'Resetting…' : 'Reset Password'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Manage Roles — informational, not a configurable permissions
+          matrix. Roles are fixed in code (each route's authorize() call),
+          not database-driven, so an editable UI here would be fake. This
+          shows what's actually true today. */}
+      <Modal open={showRolesModal} onClose={() => setShowRolesModal(false)} title="Roles & Access" size="lg">
+        <div className="space-y-3">
+          <p className="text-xs text-text-muted">
+            Roles are fixed in how the system is built today, not editable from this screen — this table shows what each role can actually access right now.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-surface-50">
+                <tr>
+                  <th className="table-header px-3 py-2 text-left">Role</th>
+                  {ROLE_ACCESS_COLUMNS.map(h => <th key={h} className="table-header px-3 py-2 text-left">{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {ROLE_ACCESS.map(r => (
+                  <tr key={r.role} className="table-row">
+                    <td className="table-cell font-medium text-xs">{r.role}</td>
+                    {r.access.map((can, i) => (
+                      <td key={i} className="table-cell text-xs">
+                        <span className={can ? 'text-status-success' : 'text-text-muted'}>{can ? '✓' : '—'}</span>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       </Modal>

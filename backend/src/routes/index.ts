@@ -1,23 +1,28 @@
 import { Router } from 'express';
-import { login, getProfile, changePassword } from '../controllers/authController';
+import { login, register, forgotPassword, resetPassword, getProfile, changePassword } from '../controllers/authController';
 import { getOrders, getOrderById, createOrder, updateOrderStatus, processPayment, cancelPendingPayment, refundOrder, voidOrder, getOrderStats } from '../controllers/ordersController';
-import { getMenuItems, getCategories, createMenuItem, updateMenuItem, deleteMenuItem, getRecipe, setRecipe } from '../controllers/menuController';
+import { getMenuItems, getCategories, createMenuItem, updateMenuItem, deleteMenuItem, getRecipe, setRecipe, getMenuItemByBarcode } from '../controllers/menuController';
 import { uploadMenuImage } from '../controllers/uploadController';
 import { getInventory, adjustStock, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryActivity, getLowStock } from '../controllers/inventoryController';
-import { getCustomers, getCustomerById, createCustomer, updateCustomer } from '../controllers/customersController';
-import { getDailyReport, getWeeklyReport, getMonthlyReport } from '../controllers/reportsController';
-import { getExpenses, createExpense, updateExpense, deleteExpense, getExpenseCategories } from '../controllers/expensesController';
-import { getStaff, createStaff, updateStaff, getSchedules, upsertSchedule } from '../controllers/staffController';
+import { getCustomers, getCustomerById, createCustomer, updateCustomer, deleteCustomer, redeemPoints, adjustPoints } from '../controllers/customersController';
+import { getLoyaltyStats, getLoyaltyTiers, updatePointValue } from '../controllers/loyaltyController';
+import { getDailyReport, getSummaryReport } from '../controllers/reportsController';
+import { getExpenses, getExpenseStats, createExpense, updateExpense, deleteExpense, getExpenseCategories, createExpenseCategory, uploadExpenseReceipt } from '../controllers/expensesController';
+import { getStaff, createStaff, updateStaff, setApprovalStatus, resetStaffPassword, getSchedules, upsertSchedule, deleteSchedule } from '../controllers/staffController';
 import { getTables, updateTableStatus, createTable, updateTable, deleteTable, getReservations, createReservation, updateReservationStatus } from '../controllers/tablesController';
-import { getPurchaseOrders, getPurchaseOrderById, createPurchaseOrder, getSuppliers } from '../controllers/purchasesController';
+import { getPurchaseOrders, getPurchaseOrderById, createPurchaseOrder, receivePurchaseOrder, getSuppliers, createSupplier } from '../controllers/purchasesController';
 import { initiateStkPush, queryStkStatus, mpesaCallback, reconcilePayment } from '../controllers/mpesaController';
 import { createHeldOrder, getHeldOrders, deleteHeldOrder } from '../controllers/heldOrdersController';
+import { getSettings, updateSettings, uploadLogo, getSystemInfo, getStorageUsage, createBackup, getBackups, downloadBackup, getRecentActivity } from '../controllers/settingsController';
 import { authenticate, authorize } from '../middleware/auth';
 
 const router = Router();
 
 // Auth
 router.post('/auth/login', login);
+router.post('/auth/register', register);
+router.post('/auth/forgot-password', forgotPassword);
+router.post('/auth/reset-password', resetPassword);
 router.get('/auth/profile', authenticate, getProfile);
 router.put('/auth/change-password', authenticate, changePassword);
 
@@ -44,6 +49,7 @@ router.post('/menu/upload', authenticate, authorize('administrator', 'manager'),
 router.put('/menu/items/:id', authenticate, authorize('administrator', 'manager'), updateMenuItem);
 router.delete('/menu/items/:id', authenticate, authorize('administrator', 'manager'), deleteMenuItem);
 router.get('/menu/items/:id/recipe', authenticate, getRecipe);
+router.get('/menu/items/barcode/:code', authenticate, getMenuItemByBarcode);
 router.put('/menu/items/:id/recipe', authenticate, authorize('administrator', 'manager'), setRecipe);
 
 // Inventory
@@ -60,25 +66,36 @@ router.get('/customers', authenticate, getCustomers);
 router.get('/customers/:id', authenticate, getCustomerById);
 router.post('/customers', authenticate, createCustomer);
 router.put('/customers/:id', authenticate, updateCustomer);
+router.post('/customers/:id/redeem-points', authenticate, redeemPoints);
+router.post('/customers/:id/adjust-points', authenticate, authorize('administrator', 'manager'), adjustPoints);
+router.delete('/customers/:id', authenticate, authorize('administrator', 'manager'), deleteCustomer);
+router.get('/loyalty/stats', authenticate, getLoyaltyStats);
+router.get('/loyalty/tiers', authenticate, getLoyaltyTiers);
+router.put('/loyalty/point-value', authenticate, authorize('administrator', 'manager'), updatePointValue);
 
 // Reports
 router.get('/reports/daily', authenticate, getDailyReport);
-router.get('/reports/weekly', authenticate, getWeeklyReport);
-router.get('/reports/monthly', authenticate, getMonthlyReport);
+router.get('/reports/summary', authenticate, getSummaryReport);
 
 // Expenses
 router.get('/expenses', authenticate, getExpenses);
+router.get('/expenses/stats', authenticate, getExpenseStats);
 router.get('/expenses/categories', authenticate, getExpenseCategories);
+router.post('/expenses/categories', authenticate, authorize('administrator', 'manager'), createExpenseCategory);
 router.post('/expenses', authenticate, createExpense);
 router.put('/expenses/:id', authenticate, updateExpense);
+router.post('/expenses/:id/receipt', authenticate, uploadExpenseReceipt);
 router.delete('/expenses/:id', authenticate, authorize('administrator', 'manager'), deleteExpense);
 
 // Staff
 router.get('/staff', authenticate, authorize('administrator', 'manager'), getStaff);
 router.post('/staff', authenticate, authorize('administrator', 'manager'), createStaff);
 router.put('/staff/:id', authenticate, authorize('administrator', 'manager'), updateStaff);
+router.put('/staff/:id/reset-password', authenticate, authorize('administrator', 'manager'), resetStaffPassword);
+router.put('/staff/:id/approval', authenticate, authorize('administrator', 'manager'), setApprovalStatus);
 router.get('/staff/schedules', authenticate, getSchedules);
 router.post('/staff/schedules', authenticate, authorize('administrator', 'manager'), upsertSchedule);
+router.delete('/staff/schedules/:user_id/:shift_date', authenticate, authorize('administrator', 'manager'), deleteSchedule);
 
 // Tables
 router.get('/tables', authenticate, getTables);
@@ -106,7 +123,11 @@ router.delete('/held-orders/:id', authenticate, deleteHeldOrder);
 router.get('/purchases', authenticate, getPurchaseOrders);
 router.get('/purchases/:id', authenticate, getPurchaseOrderById);
 router.post('/purchases', authenticate, authorize('administrator', 'manager'), createPurchaseOrder);
+// Receiving a delivery is routine floor/stockroom operation, same level as
+// adjustStock — not restricted to admin/manager the way creating a new PO is.
+router.put('/purchases/:id/receive', authenticate, receivePurchaseOrder);
 router.get('/suppliers', authenticate, getSuppliers);
+router.post('/suppliers', authenticate, authorize('administrator', 'manager'), createSupplier);
 
 // M-Pesa
 router.post('/mpesa/stk-push', authenticate, initiateStkPush);
@@ -117,5 +138,22 @@ router.post('/mpesa/callback', mpesaCallback); // No auth — called by Safarico
 // from it before this fix) references /api/payments/mpesa/callback. Keep
 // both live so existing callback URL configs don't silently break.
 router.post('/payments/mpesa/callback', mpesaCallback); // No auth — called by Safaricom servers
+
+// Settings — General/Business Profile viewable by any authenticated staff
+// (e.g. business name/logo shown elsewhere in the app), editable only by
+// admin/manager. System info, storage, and backups are more sensitive
+// (infra + a complete data export) and restricted further where noted below.
+router.get('/settings', authenticate, getSettings);
+router.put('/settings', authenticate, authorize('administrator', 'manager'), updateSettings);
+router.post('/settings/logo', authenticate, authorize('administrator', 'manager'), uploadLogo);
+router.get('/settings/system-info', authenticate, authorize('administrator', 'manager'), getSystemInfo);
+router.get('/settings/storage-usage', authenticate, authorize('administrator', 'manager'), getStorageUsage);
+router.get('/settings/recent-activity', authenticate, authorize('administrator', 'manager'), getRecentActivity);
+// Backups contain every order, payment, and customer record the business
+// has — restricted to administrator only, one level tighter than the rest
+// of Settings (manager cannot create/list/download them).
+router.post('/settings/backup', authenticate, authorize('administrator'), createBackup);
+router.get('/settings/backups', authenticate, authorize('administrator'), getBackups);
+router.get('/settings/backups/:filename', authenticate, authorize('administrator'), downloadBackup);
 
 export default router;

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Download, Printer, Plus, Calendar, Filter } from 'lucide-react';
-import { addDays, startOfWeek, format, isSameDay, addWeeks, subWeeks } from 'date-fns';
+import { ChevronLeft, ChevronRight, Printer, Plus, Copy, X } from 'lucide-react';
+import { addDays, startOfWeek, format, isSameDay, addWeeks, subWeeks, subDays, addMonths, subMonths } from 'date-fns';
 import api from '@/lib/api';
 import { getInitials } from '@/lib/utils';
 import { PageHeader } from '@/components/ui';
@@ -29,20 +29,22 @@ const SHIFT_LABELS: Record<string, string> = {
   night: 'Night (3PM-11PM)',
 };
 
+const SHIFT_HOURS: Record<string, number> = { morning: 8, day: 8, evening: 8, night: 8, off: 0 };
+
+// Postgres DATE columns come back through node-pg as full ISO timestamp
+// strings ("2026-07-06T00:00:00.000Z"), not the plain "2026-07-06" a
+// frontend date picker or date-fns format() produces — comparing them
+// directly with === silently never matches. This is exactly the bug behind
+// every schedule cell showing "Unscheduled" regardless of how many shifts
+// were actually saved: the write always succeeded, the read-back comparison
+// never did. The first 10 characters of either shape are always the plain
+// calendar date, with no timezone conversion involved (Postgres DATE has no
+// time-of-day or zone to begin with).
+const normalizeDate = (d: string): string => d.slice(0, 10);
+
 const ROLE_LABEL: Record<string, string> = {
   administrator: 'Administrator', manager: 'Manager', head_chef: 'Head Chef',
   cashier: 'Cashier', waiter: 'Waiter', kitchen_staff: 'Kitchen Staff', cleaner: 'Cleaner',
-};
-
-// Default weekly schedule for demo
-const DEFAULT_SCHEDULE: Record<string, string[]> = {
-  administrator: ['day','day','off','day','day','day','off'],
-  manager: ['day','day','day','day','day','day','off'],
-  head_chef: ['morning','morning','morning','off','morning','morning','off'],
-  cashier: ['day','day','day','day','off','day','off'],
-  waiter: ['evening','evening','evening','evening','evening','off','off'],
-  kitchen_staff: ['morning','morning','morning','morning','morning','off','off'],
-  cleaner: ['day','day','off','day','day','day','off'],
 };
 
 export default function SchedulingPage() {
@@ -50,33 +52,23 @@ export default function SchedulingPage() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [loading, setLoading] = useState(true);
-  const [currentDate] = useState(new Date());
+  const [miniCalMonth, setMiniCalMonth] = useState(new Date());
+  const [roleFilter, setRoleFilter] = useState('');
   const [showAddShift, setShowAddShift] = useState(false);
   const [editingCell, setEditingCell] = useState<{ userId: string; dayIdx: number } | null>(null);
+  const [copying, setCopying] = useState(false);
+  const [addForm, setAddForm] = useState({ user_id: '', shift_date: '', shift_type: 'day' });
+  const [savingAdd, setSavingAdd] = useState(false);
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-
-  const leaveRequests = [
-    { name: 'Alice Wanjiku', dates: 'May 28 - May 30, 2025', duration: '3 days', status: 'approved', color: 'text-status-success' },
-    { name: 'Brian Otieno', dates: 'June 10 - June 11, 2025', duration: '1 day', status: 'pending', color: 'text-status-warning' },
-    { name: 'Sarah Ndungu', dates: 'June 22, 2025', duration: '1 day', status: 'declined', color: 'text-status-error' },
-  ];
-
-  const shiftSummary = [
-    { label: 'Morning (6AM-2PM)', count: 24, color: 'bg-status-success' },
-    { label: 'Day (8AM-4PM)', count: 26, color: 'bg-brand' },
-    { label: 'Evening (11AM-7PM)', count: 20, color: 'bg-status-purple' },
-    { label: 'Night (3PM-11PM)', count: 8, color: 'bg-status-info' },
-  ];
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const startDate = format(weekStart, 'yyyy-MM-dd');
       const endDate = format(addDays(weekStart, 6), 'yyyy-MM-dd');
-
       const [staffRes, schedRes] = await Promise.all([
-        api.get('/staff', { params: { limit: 20 } }),
+        api.get('/staff', { params: { limit: 50 } }),
         api.get('/staff/schedules', { params: { start_date: startDate, end_date: endDate } }).catch(() => ({ data: { data: [] } }))
       ]);
       setStaff(staffRes.data.data);
@@ -87,32 +79,23 @@ export default function SchedulingPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const getShiftForDay = (userId: string, dayIdx: number): string => {
-    const day = weekDays[dayIdx];
-    const dateStr = format(day, 'yyyy-MM-dd');
-    const found = schedules.find(s => s.user_id === userId && s.shift_date === dateStr);
-    if (found) return found.shift_type;
-    const member = staff.find(s => s.id === userId);
-    if (member) {
-      const defaults = DEFAULT_SCHEDULE[member.role] || DEFAULT_SCHEDULE.waiter;
-      return defaults[dayIdx] || 'off';
-    }
-    return 'off';
+  // Nothing scheduled for a cell used to silently show a made-up default
+  // shift (e.g. every waiter always "on evening shift" even if no one had
+  // ever actually scheduled them) — indistinguishable from a real
+  // assignment. Returns null now instead, and the grid shows an honest
+  // "Unscheduled" state for it.
+  const getShiftForDay = (userId: string, dayIdx: number): Schedule | null => {
+    const dateStr = format(weekDays[dayIdx], 'yyyy-MM-dd');
+    return schedules.find(s => s.user_id === userId && normalizeDate(s.shift_date) === dateStr) || null;
   };
 
-  const getShiftLabel = (userId: string, dayIdx: number): string => {
-    const shift = getShiftForDay(userId, dayIdx);
-    if (shift === 'off') return 'Off';
-    const member = staff.find(s => s.id === userId);
-    return ROLE_LABEL[member?.role || ''] || shift.charAt(0).toUpperCase() + shift.slice(1);
-  };
-
-  const getShiftTime = (shift: string): string => {
+  const getShiftTime = (s: Schedule): string => {
+    if (s.start_time && s.end_time) return `${s.start_time.slice(0, 5)} – ${s.end_time.slice(0, 5)}`;
     const times: Record<string, string> = {
       morning: '6:00 AM – 2:00 PM', day: '8:00 AM – 4:00 PM',
       evening: '11:00 AM – 7:00 PM', night: '3:00 PM – 11:00 PM',
     };
-    return times[shift] || '';
+    return times[s.shift_type] || '';
   };
 
   const updateShift = async (userId: string, dayIdx: number, shiftType: string) => {
@@ -126,44 +109,140 @@ export default function SchedulingPage() {
       toast.success('Shift updated');
       setEditingCell(null);
       fetchData();
-    } catch { toast.error('Failed to update shift'); }
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update shift';
+      toast.error(msg);
+    }
   };
 
-  // Mini calendar helpers
-  const miniMonth = Array.from({ length: 31 }, (_, i) => {
-    const d = new Date(currentDate.getFullYear(), currentDate.getMonth(), i + 1);
-    return d.getMonth() === currentDate.getMonth() ? d : null;
-  }).filter(Boolean) as Date[];
+  const clearShift = async (userId: string, dayIdx: number) => {
+    const shiftDate = format(weekDays[dayIdx], 'yyyy-MM-dd');
+    try {
+      await api.delete(`/staff/schedules/${userId}/${shiftDate}`);
+      toast.success('Schedule entry removed');
+      setEditingCell(null);
+      fetchData();
+    } catch {
+      toast.error('Failed to remove schedule entry');
+    }
+  };
 
-  const openShifts = [1, 2, 3, 5].includes(weekDays.findIndex(d => isSameDay(d, new Date()))) ? [0, 1, 3, 5] : [0, 1, 3];
+  // Real, not decorative — fetches last week's actual entries and re-posts
+  // each one for the corresponding day this week. Skips any day that
+  // already has an entry this week rather than overwriting it silently.
+  const copyLastWeek = async () => {
+    setCopying(true);
+    try {
+      const lastWeekStart = subDays(weekStart, 7);
+      const { data } = await api.get('/staff/schedules', {
+        params: { start_date: format(lastWeekStart, 'yyyy-MM-dd'), end_date: format(addDays(lastWeekStart, 6), 'yyyy-MM-dd') }
+      });
+      const lastWeekSchedules: Schedule[] = data.data;
+      if (lastWeekSchedules.length === 0) { toast('No schedule found for last week to copy.', { icon: 'ℹ️' }); return; }
+
+      let copied = 0, skipped = 0;
+      for (const s of lastWeekSchedules) {
+        const dayOffset = Math.round((new Date(s.shift_date).getTime() - lastWeekStart.getTime()) / 86400000);
+        const newDate = format(addDays(weekStart, dayOffset), 'yyyy-MM-dd');
+        const alreadyExists = schedules.some(existing => existing.user_id === s.user_id && normalizeDate(existing.shift_date) === newDate);
+        if (alreadyExists) { skipped++; continue; }
+        await api.post('/staff/schedules', { user_id: s.user_id, shift_date: newDate, shift_type: s.shift_type, role_label: s.role_label });
+        copied++;
+      }
+      toast.success(`Copied ${copied} shift${copied === 1 ? '' : 's'} from last week${skipped ? ` (${skipped} skipped — already scheduled)` : ''}`);
+      fetchData();
+    } catch {
+      toast.error('Failed to copy last week\'s schedule');
+    } finally { setCopying(false); }
+  };
+
+  const submitAddShift = async () => {
+    if (!addForm.user_id || !addForm.shift_date) { toast.error('Choose a staff member and date'); return; }
+    setSavingAdd(true);
+    try {
+      const member = staff.find(s => s.id === addForm.user_id);
+      await api.post('/staff/schedules', {
+        user_id: addForm.user_id, shift_date: addForm.shift_date, shift_type: addForm.shift_type,
+        role_label: ROLE_LABEL[member?.role || ''] || 'Staff'
+      });
+      toast.success('Schedule created');
+      setShowAddShift(false);
+      setAddForm({ user_id: '', shift_date: '', shift_type: 'day' });
+      fetchData();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to create schedule';
+      toast.error(msg);
+    } finally { setSavingAdd(false); }
+  };
+
+  const filteredStaff = roleFilter ? staff.filter(s => s.role === roleFilter) : staff;
+
+  // Every number below is computed from the real schedules just fetched —
+  // this used to be five hardcoded values ("412h 30m", "96%" coverage,
+  // "3" open shifts, "12h 30m" overtime) that never changed regardless of
+  // what was actually scheduled. "Open Shifts" and "Overtime" are gone
+  // rather than faked differently — neither has a real basis to compute
+  // from (there's no staffing-requirement model to be "open" against, and
+  // no contracted-hours baseline to be "over"), so a number here would be
+  // just as fabricated as before.
+  const realShifts = schedules.filter(s => s.shift_type !== 'off');
+  const totalShifts = realShifts.length;
+  const totalHours = realShifts.reduce((sum, s) => {
+    if (s.start_time && s.end_time) {
+      const [sh, sm] = s.start_time.split(':').map(Number);
+      const [eh, em] = s.end_time.split(':').map(Number);
+      return sum + Math.max(0, (eh * 60 + em - (sh * 60 + sm)) / 60);
+    }
+    return sum + (SHIFT_HOURS[s.shift_type] || 0);
+  }, 0);
+  const staffScheduledCount = new Set(realShifts.map(s => s.user_id)).size;
+  const shiftTypeCounts = ['morning', 'day', 'evening', 'night'].map(type => ({
+    type, label: SHIFT_LABELS[type], count: realShifts.filter(s => s.shift_type === type).length,
+  }));
+
+  const miniMonthDays = Array.from({ length: new Date(miniCalMonth.getFullYear(), miniCalMonth.getMonth() + 1, 0).getDate() }, (_, i) =>
+    new Date(miniCalMonth.getFullYear(), miniCalMonth.getMonth(), i + 1)
+  );
+
+  const exportCsv = () => {
+    const rows = [['Staff Member', 'Role', 'Date', 'Shift', 'Start', 'End']];
+    filteredStaff.forEach(member => {
+      weekDays.forEach((_, dayIdx) => {
+        const s = getShiftForDay(member.id, dayIdx);
+        if (s) rows.push([member.full_name, ROLE_LABEL[member.role] || member.role, normalizeDate(s.shift_date), s.shift_type, s.start_time || '', s.end_time || '']);
+      });
+    });
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `schedule-${format(weekStart, 'yyyy-MM-dd')}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="flex h-full overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Scheduling" subtitle="Create and manage staff schedules and shifts">
-          <button className="btn-secondary flex items-center gap-1.5 text-sm"><Download size={13} /> Export</button>
-          <button className="btn-secondary flex items-center gap-1.5 text-sm"><Printer size={13} /> Print</button>
-          <button onClick={() => setShowAddShift(true)} className="btn-primary flex items-center gap-2 text-sm">
+          <button onClick={exportCsv} className="btn-secondary flex items-center gap-1.5 text-sm">Export CSV</button>
+          <button onClick={() => window.print()} className="btn-secondary flex items-center gap-1.5 text-sm"><Printer size={13} /> Print</button>
+          <button onClick={() => { setAddForm({ user_id: '', shift_date: format(weekStart, 'yyyy-MM-dd'), shift_type: 'day' }); setShowAddShift(true); }} className="btn-primary flex items-center gap-2 text-sm">
             <Plus size={14} /> Create Schedule
           </button>
         </PageHeader>
 
-        {/* Stats */}
-        <div className="grid grid-cols-5 gap-3 mb-5">
+        {/* Stats — every number here is real */}
+        <div className="grid grid-cols-3 gap-3 mb-5">
           {[
-            { label: 'Total Scheduled Hours', value: '412h 30m', icon: '🕐', sub: 'This week', color: 'text-status-info' },
-            { label: 'Total Shifts', value: '78', icon: '📅', sub: 'This week', color: 'text-text-primary' },
-            { label: 'Coverage', value: '96%', icon: '✅', sub: 'Average coverage', color: 'text-status-success' },
-            { label: 'Open Shifts', value: '3', icon: '👤', sub: 'Need to be filled', color: 'text-status-warning' },
-            { label: 'Overtime Hours', value: '12h 30m', icon: '⏱️', sub: 'This week', color: 'text-status-error' },
+            { label: 'Total Shifts', value: String(totalShifts), sub: 'This week', color: 'text-text-primary' },
+            { label: 'Total Scheduled Hours', value: `${Math.round(totalHours)}h`, sub: 'This week', color: 'text-status-info' },
+            { label: 'Staff Scheduled', value: `${staffScheduledCount} / ${staff.length}`, sub: 'Have at least one shift', color: 'text-status-success' },
           ].map(s => (
-            <div key={s.label} className="card p-3 flex items-start gap-2">
-              <span className="text-xl">{s.icon}</span>
-              <div>
-                <p className={`text-base font-bold ${s.color}`}>{s.value}</p>
-                <p className="text-xs text-text-muted">{s.label}</p>
-                <p className="text-[10px] text-text-muted">{s.sub}</p>
-              </div>
+            <div key={s.label} className="card p-3">
+              <p className={`text-lg font-bold ${s.color}`}>{s.value}</p>
+              <p className="text-xs text-text-muted">{s.label}</p>
+              <p className="text-[10px] text-text-muted">{s.sub}</p>
             </div>
           ))}
         </div>
@@ -176,11 +255,13 @@ export default function SchedulingPage() {
             {format(weekStart, 'MMM d')} – {format(addDays(weekStart, 6), 'MMM d, yyyy')}
           </span>
           <button onClick={() => setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))} className="btn-secondary text-xs py-1">Today</button>
-          <button className="btn-secondary text-xs py-1 flex items-center gap-1"><Calendar size={12} /></button>
-          <select className="select text-xs py-1.5 w-36"><option>All Locations</option></select>
-          <select className="select text-xs py-1.5 w-28"><option>All Roles</option>{Object.entries(ROLE_LABEL).map(([k,v]) => <option key={k} value={k}>{v}</option>)}</select>
-          <select className="select text-xs py-1.5 w-24"><option>Week</option><option>Day</option></select>
-          <button className="btn-secondary flex items-center gap-1.5 text-xs py-1.5"><Filter size={12} /> Filters</button>
+          <select className="select text-xs py-1.5 w-32" value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
+            <option value="">All Roles</option>
+            {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <button onClick={copyLastWeek} disabled={copying} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 disabled:opacity-50">
+            <Copy size={12} /> {copying ? 'Copying…' : 'Copy Last Week'}
+          </button>
         </div>
 
         {/* Schedule Grid */}
@@ -200,9 +281,10 @@ export default function SchedulingPage() {
             <tbody>
               {loading ? (
                 <tr><td colSpan={8} className="py-12 text-center"><div className="flex justify-center"><div className="w-8 h-8 border-2 border-border border-t-brand rounded-full animate-spin" /></div></td></tr>
-              ) : staff.map(member => (
+              ) : filteredStaff.length === 0 ? (
+                <tr><td colSpan={8} className="py-12 text-center text-text-muted text-sm">No staff match this filter</td></tr>
+              ) : filteredStaff.map(member => (
                 <tr key={member.id} className="border-b border-border/50 hover:bg-surface-50/50 transition-colors">
-                  {/* Staff info */}
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <div className="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center text-xs font-bold shrink-0">
@@ -214,38 +296,47 @@ export default function SchedulingPage() {
                       </div>
                     </div>
                   </td>
-                  {/* Shift cells */}
                   {weekDays.map((_, dayIdx) => {
-                    const shift = getShiftForDay(member.id, dayIdx);
+                    const entry = getShiftForDay(member.id, dayIdx);
                     const isEditing = editingCell?.userId === member.id && editingCell?.dayIdx === dayIdx;
                     return (
                       <td key={dayIdx} className="px-1.5 py-2 text-center relative">
                         {isEditing ? (
-                          <select
-                            autoFocus
-                            className="select text-xs py-1 w-full"
-                            defaultValue={shift}
-                            onBlur={() => setEditingCell(null)}
-                            onChange={e => updateShift(member.id, dayIdx, e.target.value)}
-                          >
-                            <option value="morning">Morning 6AM-2PM</option>
-                            <option value="day">Day 8AM-4PM</option>
-                            <option value="evening">Evening 11AM-7PM</option>
-                            <option value="night">Night 3PM-11PM</option>
-                            <option value="off">Off</option>
-                          </select>
+                          <div className="flex items-center gap-1">
+                            <select
+                              autoFocus
+                              className="select text-xs py-1 w-full"
+                              defaultValue={entry?.shift_type || ''}
+                              onBlur={() => setEditingCell(null)}
+                              onChange={e => updateShift(member.id, dayIdx, e.target.value)}
+                            >
+                              <option value="" disabled>Set shift…</option>
+                              <option value="morning">Morning 6AM-2PM</option>
+                              <option value="day">Day 8AM-4PM</option>
+                              <option value="evening">Evening 11AM-7PM</option>
+                              <option value="night">Night 3PM-11PM</option>
+                              <option value="off">Off</option>
+                            </select>
+                            {entry && (
+                              <button onMouseDown={e => e.preventDefault()} onClick={() => clearShift(member.id, dayIdx)} className="btn-ghost p-1 text-status-error shrink-0" title="Remove this schedule entry entirely">
+                                <X size={12} />
+                              </button>
+                            )}
+                          </div>
                         ) : (
                           <button
                             onClick={() => setEditingCell({ userId: member.id, dayIdx })}
-                            className={`w-full rounded-lg px-1.5 py-1.5 text-[10px] font-medium text-center transition-all hover:opacity-80 ${SHIFT_COLORS[shift] || SHIFT_COLORS.off}`}
+                            className={`w-full rounded-lg px-1.5 py-1.5 text-[10px] font-medium text-center transition-all hover:opacity-80 ${entry ? (SHIFT_COLORS[entry.shift_type] || SHIFT_COLORS.off) : 'border border-dashed border-border text-text-muted'}`}
                           >
-                            {shift !== 'off' ? (
+                            {!entry ? (
+                              <span>Unscheduled</span>
+                            ) : entry.shift_type !== 'off' ? (
                               <>
-                                <div>{getShiftTime(shift)}</div>
-                                <div className="opacity-80">{getShiftLabel(member.id, dayIdx)}</div>
+                                <div>{getShiftTime(entry)}</div>
+                                <div className="opacity-80">{entry.role_label || ROLE_LABEL[member.role]}</div>
                               </>
                             ) : (
-                              <span className="text-text-muted">Off</span>
+                              <span>Off</span>
                             )}
                           </button>
                         )}
@@ -254,29 +345,8 @@ export default function SchedulingPage() {
                   })}
                 </tr>
               ))}
-
-              {/* Open shifts row */}
-              <tr className="border-t-2 border-border">
-                <td className="px-4 py-3">
-                  <button className="flex items-center gap-1.5 text-xs text-brand hover:text-brand-400">
-                    <Plus size={12} /> Add Staff
-                  </button>
-                </td>
-                {weekDays.map((_, dayIdx) => (
-                  <td key={dayIdx} className="px-1.5 py-2">
-                    {openShifts.includes(dayIdx) && (
-                      <button className="w-full rounded-lg border-2 border-dashed border-brand/30 px-1.5 py-1.5 text-[10px] text-brand/60 hover:border-brand hover:text-brand transition-colors">
-                        Open Shift<br />Click to assign
-                      </button>
-                    )}
-                  </td>
-                ))}
-              </tr>
             </tbody>
           </table>
-          <p className="text-[10px] text-text-muted px-4 py-2 border-t border-border">
-            ℹ Shifts start and end times are inclusive of break time.
-          </p>
         </div>
       </div>
 
@@ -285,21 +355,20 @@ export default function SchedulingPage() {
         {/* Mini calendar */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <h2 className="section-title text-sm">{format(currentDate, 'MMMM yyyy')}</h2>
+            <h2 className="section-title text-sm">{format(miniCalMonth, 'MMMM yyyy')}</h2>
             <div className="flex gap-1">
-              <button className="btn-ghost p-0.5"><ChevronLeft size={12} /></button>
-              <button className="btn-ghost p-0.5"><ChevronRight size={12} /></button>
+              <button onClick={() => setMiniCalMonth(m => subMonths(m, 1))} className="btn-ghost p-0.5"><ChevronLeft size={12} /></button>
+              <button onClick={() => setMiniCalMonth(m => addMonths(m, 1))} className="btn-ghost p-0.5"><ChevronRight size={12} /></button>
             </div>
           </div>
           <div className="grid grid-cols-7 gap-0.5 text-center">
             {['Mo','Tu','We','Th','Fr','Sa','Su'].map(d => (
               <div key={d} className="text-[10px] text-text-muted py-0.5">{d}</div>
             ))}
-            {/* Offset for first day */}
-            {Array.from({ length: (new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getDay() + 6) % 7 }, (_, i) => (
+            {Array.from({ length: (new Date(miniCalMonth.getFullYear(), miniCalMonth.getMonth(), 1).getDay() + 6) % 7 }, (_, i) => (
               <div key={`off-${i}`} />
             ))}
-            {miniMonth.map(d => {
+            {miniMonthDays.map(d => {
               const inWeek = d >= weekStart && d <= addDays(weekStart, 6);
               const isToday = isSameDay(d, new Date());
               return (
@@ -313,55 +382,17 @@ export default function SchedulingPage() {
           </div>
         </div>
 
-        {/* Shift Summary */}
+        {/* Shift Summary — real counts from this week's actual schedules */}
         <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="section-title text-sm">Shift Summary</h2>
-            <button className="text-xs text-brand">View Report</button>
-          </div>
+          <h2 className="section-title text-sm mb-3">Shift Summary</h2>
           <div className="space-y-2">
-            {shiftSummary.map(s => (
-              <div key={s.label} className="flex items-center gap-2 text-xs">
-                <div className={`w-2 h-2 rounded-full shrink-0 ${s.color}`} />
+            {shiftTypeCounts.map(s => (
+              <div key={s.type} className="flex items-center gap-2 text-xs">
+                <div className={`w-2 h-2 rounded-full shrink-0 ${SHIFT_COLORS[s.type].split(' ')[0]}`} />
                 <span className="text-text-secondary flex-1 text-[11px]">{s.label}</span>
                 <span className="font-bold">{s.count}</span>
               </div>
             ))}
-          </div>
-        </div>
-
-        {/* Pending Leave */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="section-title text-sm">Pending Leave Requests</h2>
-            <button className="text-xs text-brand">View All</button>
-          </div>
-          <div className="space-y-3">
-            {leaveRequests.map(lr => (
-              <div key={lr.name} className="flex items-start gap-2">
-                <div className="w-7 h-7 rounded-full bg-brand/10 text-brand flex items-center justify-center text-xs font-bold shrink-0">
-                  {getInitials(lr.name)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate">{lr.name}</p>
-                  <p className="text-[10px] text-text-muted">{lr.dates}</p>
-                  <p className={`text-[10px] font-medium ${lr.color}`}>{lr.status.charAt(0).toUpperCase() + lr.status.slice(1)} · {lr.duration}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Quick Actions */}
-        <div>
-          <h2 className="section-title text-sm mb-3">Quick Actions</h2>
-          <div className="space-y-2">
-            <button className="btn-secondary w-full text-xs py-2 flex items-center justify-center gap-1.5">
-              📋 Copy Last Week Schedule
-            </button>
-            <button className="btn-secondary w-full text-xs py-2 flex items-center justify-center gap-1.5">
-              🤖 Auto Schedule (Recommend)
-            </button>
           </div>
         </div>
       </div>
@@ -374,18 +405,29 @@ export default function SchedulingPage() {
               <button onClick={() => setShowAddShift(false)} className="btn-ghost p-1">✕</button>
             </div>
             <div className="p-5 space-y-4">
-              <div><label className="block text-xs text-text-muted mb-1">Staff Member</label>
-                <select className="select">{staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}</select>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Staff Member</label>
+                <select className="select" value={addForm.user_id} onChange={e => setAddForm(p => ({ ...p, user_id: e.target.value }))}>
+                  <option value="" disabled>Select a staff member…</option>
+                  {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                </select>
               </div>
-              <div><label className="block text-xs text-text-muted mb-1">Date</label><input type="date" className="input" /></div>
-              <div><label className="block text-xs text-text-muted mb-1">Shift</label>
-                <select className="select">
-                  {Object.entries(SHIFT_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Date</label>
+                <input type="date" className="input" value={addForm.shift_date} onChange={e => setAddForm(p => ({ ...p, shift_date: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Shift</label>
+                <select className="select" value={addForm.shift_type} onChange={e => setAddForm(p => ({ ...p, shift_type: e.target.value }))}>
+                  {Object.entries(SHIFT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  <option value="off">Off</option>
                 </select>
               </div>
               <div className="flex gap-3">
                 <button onClick={() => setShowAddShift(false)} className="btn-secondary flex-1">Cancel</button>
-                <button onClick={() => { toast.success('Schedule created!'); setShowAddShift(false); }} className="btn-primary flex-1">Create</button>
+                <button onClick={submitAddShift} disabled={savingAdd} className="btn-primary flex-1 disabled:opacity-50">
+                  {savingAdd ? 'Creating…' : 'Create'}
+                </button>
               </div>
             </div>
           </div>

@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search, Scan, ShoppingCart, X, Plus, Minus,
-  Trash2, ChevronDown, Phone, CheckCircle, AlertCircle, Loader
+  Trash2, ChevronDown, Phone, CheckCircle, AlertCircle, Loader,
+  Pause, Save, Banknote, Smartphone, CreditCard, Shuffle, User, Star
 } from 'lucide-react';
 import api from '@/lib/api';
 import { formatCurrency, resolveMenuImage, menuImagePlaceholder } from '@/lib/utils';
@@ -42,6 +43,33 @@ export default function POSPage() {
   const [activeOrderCount,  setActiveOrderCount]   = useState<number | null>(null);
   const [heldOrders,        setHeldOrders]         = useState<HeldOrder[]>([]);
   const [showHeldPanel,     setShowHeldPanel]      = useState(false);
+
+  // ── Customer attachment + loyalty toggle ────────────────────────────────
+  // Walk-in by default (selectedCustomer === null) — attaching a real
+  // customer is what makes loyalty points possible at all (points need
+  // somewhere to go), and awardLoyalty is the per-sale choice on top of
+  // that: a cashier can attach a customer for order history/records without
+  // necessarily wanting to earn points on this particular sale (e.g. a
+  // staff discount).
+  const [selectedCustomer, setSelectedCustomer] = useState<{ id: string; full_name: string; phone?: string; available_points?: number } | null>(null);
+  const [awardLoyalty, setAwardLoyalty] = useState(true);
+  const [showCustomerPicker, setShowCustomerPicker] = useState(false);
+  // Scan — a real USB barcode scanner behaves as a keyboard: it "types" the
+  // code into whatever's focused, fast, then sends Enter. There's no camera
+  // feed involved, so this is just an auto-focused input capturing that,
+  // not an image-based scanner (no camera-scanning library is part of this
+  // build). scanFeed keeps a short running log so a cashier scanning several
+  // items in a row can see what just got added without the modal closing
+  // after each one.
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [scanInput, setScanInput] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [scanFeed, setScanFeed] = useState<Array<{ ok: boolean; text: string }>>([]);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerResults, setCustomerResults] = useState<Array<{ id: string; full_name: string; phone?: string; available_points?: number }>>([]);
+  const [searchingCustomers, setSearchingCustomers] = useState(false);
+  const [pointValueKes, setPointValueKes] = useState(1);
+  const [pointsToRedeem, setPointsToRedeem] = useState('');
 
   // ── Multi-tender payment state ─────────────────────────────────────────
   // Once the FIRST payment is taken against a cart, the resulting order is
@@ -137,17 +165,23 @@ export default function POSPage() {
   }, []);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+  useEffect(() => { api.get('/loyalty/stats').then(r => setPointValueKes(r.data.data.point_value_kes)).catch(() => {}); }, []);
 
-  // Fires the browser print dialog the instant a receipt is loaded into
-  // state. The short delay lets the printable DOM (rendered from
-  // `receiptOrder`, see the bottom of this file) actually paint before
-  // `window.print()` reads it — calling print() in the same tick as the
-  // state update can race the render on some browsers.
+  // Debounced customer search — only runs while the picker is actually open,
+  // same 400ms pattern used for search boxes elsewhere in the app.
   useEffect(() => {
-    if (!receiptOrder) return;
-    const t = setTimeout(() => window.print(), 150);
+    if (!showCustomerPicker) return;
+    if (!customerSearch.trim()) { setCustomerResults([]); return; }
+    const t = setTimeout(async () => {
+      setSearchingCustomers(true);
+      try {
+        const { data } = await api.get('/customers', { params: { search: customerSearch, limit: 8 } });
+        setCustomerResults(data.data);
+      } catch { /* non-critical */ }
+      finally { setSearchingCustomers(false); }
+    }, 400);
     return () => clearTimeout(t);
-  }, [receiptOrder]);
+  }, [customerSearch, showCustomerPicker]);
 
   /* ── Cart helpers ──────────────────────────────────────────────────── */
   const filtered = items.filter(item => {
@@ -171,6 +205,25 @@ export default function POSPage() {
       if (found) return prev.map(c => c.id === item.id ? { ...c, quantity: nextQty } : c);
       return [...prev, { ...item, quantity: 1 }];
     });
+
+  const handleScan = async (code: string) => {
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    setScanning(true);
+    try {
+      const { data } = await api.get(`/menu/items/barcode/${encodeURIComponent(trimmed)}`);
+      addToCart(data.data);
+      setScanFeed(prev => [{ ok: true, text: `Added: ${data.data.name}` }, ...prev].slice(0, 6));
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || `No item found for "${trimmed}"`;
+      setScanFeed(prev => [{ ok: false, text: msg }, ...prev].slice(0, 6));
+    } finally {
+      setScanning(false);
+      setScanInput('');
+    }
+  };
+
+  const closeScanModal = () => { setShowScanModal(false); setScanInput(''); setScanFeed([]); };
 
   const updateQty = (id: string, delta: number) =>
     setCart(prev =>
@@ -205,6 +258,18 @@ export default function POSPage() {
   const balanceDueDisplay = activeOrder ? Math.max(0, Math.round((activeOrder.total - activeOrder.amount_paid) * 100) / 100) : total;
   const chargeAmountDisplay = tenderAmount ? Math.min(Number(tenderAmount) || 0, balanceDueDisplay) : balanceDueDisplay;
 
+  // "Points" only ever shows up as a tender option once there's an actual
+  // customer attached with something to spend — for a walk-in sale it
+  // wouldn't mean anything.
+  const availableMethods = (selectedCustomer?.available_points || 0) > 0 ? [...PAYMENT_METHODS, 'Points'] : PAYMENT_METHODS;
+  const maxPointsUsable = Math.min(
+    selectedCustomer?.available_points || 0,
+    pointValueKes > 0 ? Math.floor(balanceDueDisplay / pointValueKes) : 0
+  );
+  useEffect(() => {
+    if (paymentMethod === 'Points' && !availableMethods.includes('Points')) setPaymentMethod('Cash');
+  }, [paymentMethod, availableMethods]);
+
   /* ── Create order ──────────────────────────────────────────────────── */
   // Dine-in orders need a real table — otherwise the kitchen has an order
   // with nowhere to deliver it, and the table picker's whole point (keeping
@@ -225,7 +290,8 @@ export default function POSPage() {
       // A real table_id links this order to restaurant_tables (occupies it,
       // shows up on the Tables page) — omitted entirely for takeaway/delivery.
       table_id: orderType === 'Dine In' ? selectedTableId : undefined,
-      customer_name: 'Walk-in Customer',
+      customer_id: selectedCustomer?.id,
+      customer_name: selectedCustomer?.full_name || 'Walk-in Customer',
       guests: 1,
       items: cart.map(c => ({ menu_item_id: c.id, item_name: c.name, quantity: c.quantity, unit_price: c.price })),
       payment_method: paymentMethodHint,
@@ -289,6 +355,9 @@ export default function POSPage() {
       setCart([]);
       setActiveOrder(null);
       setTenderAmount('');
+      setSelectedCustomer(null);
+      setAwardLoyalty(true);
+      setPointsToRedeem('');
     } else {
       setActiveOrder(prev => prev ? { ...prev, amount_paid: prev.total - balanceRemaining } : prev);
       setTenderAmount(String(balanceRemaining));
@@ -312,10 +381,39 @@ export default function POSPage() {
       const balanceDue = Math.max(0, Math.round((order.total - order.amount_paid) * 100) / 100);
       const amount = tenderAmount ? Math.min(Number(tenderAmount), balanceDue) : balanceDue;
       if (!(amount > 0)) { toast.error('Enter an amount to charge'); return; }
-      const res = await api.post(`/orders/${order.id}/payment`, { payment_method: method, amount });
+      const res = await api.post(`/orders/${order.id}/payment`, { payment_method: method, amount, award_loyalty: awardLoyalty });
+      if (res.data.points_awarded > 0) toast.success(`+${res.data.points_awarded} loyalty points earned`, { icon: '⭐' });
       settleAfterPayment(order, res.data.balance_remaining);
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Checkout failed';
+      toast.error(msg);
+    } finally { setProcessingPayment(false); }
+  };
+
+  /* ── Redeem loyalty points as a tender ────────────────────────────────
+     Same multi-tender shape as cash/card — the server derives the KES
+     amount from the points count and the configured rate itself (never
+     trusts a client-supplied amount here), and rejects rather than silently
+     capping if it would exceed the balance due, exactly like an overpaid
+     cash tender already does. This reduces what's actually owed without
+     ever touching the order's underlying subtotal/total — it's a payment
+     method, not a discount on the bill. */
+  const payWithPoints = async () => {
+    if (!selectedCustomer) { toast.error('Attach a customer to redeem their points'); return; }
+    if (!cart.length && !activeOrder) { toast.error('Cart is empty'); return; }
+    if (!activeOrder && !requireTableIfDineIn()) return;
+    if (processingPayment) return;
+    const points = pointsToRedeem ? Math.trunc(Number(pointsToRedeem)) : maxPointsUsable;
+    if (!(points > 0)) { toast.error('Enter how many points to redeem'); return; }
+    setProcessingPayment(true);
+    try {
+      const order = await ensureActiveOrder('cash'); // methodHint only matters for M-Pesa's own flow
+      const res = await api.post(`/orders/${order.id}/payment`, { payment_method: 'points', points, award_loyalty: awardLoyalty });
+      toast.success(`${points} points redeemed (${formatCurrency(points * pointValueKes)})`);
+      setPointsToRedeem('');
+      settleAfterPayment(order, res.data.balance_remaining);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Redemption failed';
       toast.error(msg);
     } finally { setProcessingPayment(false); }
   };
@@ -343,6 +441,7 @@ export default function POSPage() {
       const res = await api.get(`/orders/${orderId}`);
       const o = res.data.data;
       const balance = Math.max(0, Math.round((Number(o.total) - Number(o.amount_paid)) * 100) / 100);
+      if (o.loyalty_points_earned > 0) toast.success(`+${o.loyalty_points_earned} loyalty points earned`, { icon: '⭐' });
       setTimeout(() => {
         setShowMpesaModal(false);
         settleAfterPayment({ id: o.id, order_number: o.order_number, type: o.type, total: Number(o.total) }, balance);
@@ -370,7 +469,7 @@ export default function POSPage() {
       const amount = tenderAmount ? Math.min(Number(tenderAmount), balanceDue) : balanceDue;
       if (!(amount > 0)) { toast.error('Enter an amount to charge'); setMpesaStatus('idle'); return; }
 
-      const res = await api.post('/mpesa/stk-push', { order_id: order.id, phone: mpesaPhone, amount });
+      const res = await api.post('/mpesa/stk-push', { order_id: order.id, phone: mpesaPhone, amount, award_loyalty: awardLoyalty });
       const { checkout_request_id } = res.data.data;
       setCheckoutRequestId(checkout_request_id);
       setMpesaStatus('waiting');
@@ -505,6 +604,7 @@ export default function POSPage() {
     if (!activeOrder && !requireTableIfDineIn()) return;
     if (paymentMethod === 'M-Pesa')    openMpesaModal();
     else if (paymentMethod === 'Split Bill') setShowSplitModal(true);
+    else if (paymentMethod === 'Points') payWithPoints();
     else payCashOrCard(paymentMethod.toLowerCase() as 'cash' | 'card');
   };
 
@@ -527,7 +627,7 @@ export default function POSPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <button onClick={() => toast('Barcode/QR scanning isn\'t built yet — coming in a future update.', { icon: 'ℹ️' })} className="btn-secondary flex items-center gap-1.5 text-sm py-2">
+            <button onClick={() => setShowScanModal(true)} className="btn-secondary flex items-center gap-1.5 text-sm py-2">
               <Scan size={15} /> Scan
             </button>
             <button onClick={() => navigate('/orders')} className="btn-secondary flex items-center gap-1.5 text-sm py-2 relative">
@@ -548,7 +648,7 @@ export default function POSPage() {
                 onClick={() => { setShowHeldPanel(p => !p); setShowTablePicker(false); setShowTypePicker(false); }}
                 className="btn-secondary flex items-center gap-1.5 text-sm py-2 relative"
               >
-                ⏸ Held
+                <Pause size={14} /> Held
                 {heldOrders.length > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-status-warning rounded-full text-[10px] font-bold flex items-center justify-center text-black">
                     {heldOrders.length > 99 ? '99+' : heldOrders.length}
@@ -714,10 +814,10 @@ export default function POSPage() {
         {/* Bottom actions */}
         <div className="flex items-center gap-2 pt-3 border-t border-border">
           <button onClick={() => holdCurrentOrder()} className="btn-secondary flex-1 py-2.5 text-sm flex items-center justify-center gap-2">
-            ⏸ Hold Order
+            <Pause size={14} /> Hold Order
           </button>
           <button onClick={saveDraft} className="btn-secondary flex-1 py-2.5 text-sm flex items-center justify-center gap-2">
-            💾 Save Draft
+            <Save size={14} /> Save Draft
           </button>
           <button
             onClick={() => setCart([])}
@@ -746,6 +846,33 @@ export default function POSPage() {
             <button onClick={() => setShowTablePicker(true)} className="text-sm text-brand font-medium hover:text-brand-400">
               {selectedTable ? 'Change' : 'Select table'}
             </button>
+          )}
+        </div>
+
+        {/* Customer + loyalty */}
+        <div className="px-5 pt-4">
+          <button
+            onClick={() => { setShowCustomerPicker(true); setCustomerSearch(''); setCustomerResults([]); }}
+            disabled={!!activeOrder}
+            className="w-full flex items-center justify-between gap-2 bg-surface-50 hover:bg-surface-100 rounded-xl px-3 py-2.5 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span className="flex items-center gap-2 text-text-secondary">
+              <User size={14} />
+              {selectedCustomer ? (
+                <span className="text-text-primary font-medium">{selectedCustomer.full_name}{selectedCustomer.phone ? ` · ${selectedCustomer.phone}` : ''}</span>
+              ) : 'Walk-in Customer'}
+            </span>
+            {selectedCustomer ? (
+              <span onClick={e => { e.stopPropagation(); setSelectedCustomer(null); }} className="text-text-muted hover:text-status-error p-1"><X size={13} /></span>
+            ) : (
+              <span className="text-brand text-xs font-medium">Attach customer</span>
+            )}
+          </button>
+          {selectedCustomer && (
+            <label className="flex items-center gap-2 mt-2 px-1 text-xs text-text-secondary cursor-pointer">
+              <input type="checkbox" checked={awardLoyalty} onChange={e => setAwardLoyalty(e.target.checked)} disabled={!!activeOrder} />
+              Award loyalty points on this sale
+            </label>
           )}
         </div>
 
@@ -852,20 +979,41 @@ export default function POSPage() {
               only part of the balance via this method, see what's still
               owed, then pick a different method (e.g. M-Pesa, then Cash)
               for the rest. */}
-          <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Amount to charge now</label>
-            <input
-              type="number" min={0} step={1}
-              value={tenderAmount}
-              onChange={e => setTenderAmount(e.target.value)}
-              placeholder={String(activeOrder ? Math.max(0, activeOrder.total - activeOrder.amount_paid) : total)}
-              className="input font-bold text-lg"
-            />
-          </div>
+          {paymentMethod === 'Points' ? (
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">
+                Points to redeem — {selectedCustomer?.available_points || 0} available, up to {maxPointsUsable} usable on this balance
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="number" min={0} max={maxPointsUsable} step={1}
+                  value={pointsToRedeem}
+                  onChange={e => setPointsToRedeem(e.target.value)}
+                  placeholder={String(maxPointsUsable)}
+                  className="input font-bold text-lg flex-1"
+                />
+                <button type="button" onClick={() => setPointsToRedeem(String(maxPointsUsable))} className="btn-secondary text-xs px-3">Max</button>
+              </div>
+              <p className="text-xs text-brand mt-1">
+                = {formatCurrency((pointsToRedeem ? Number(pointsToRedeem) : maxPointsUsable) * pointValueKes)}
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">Amount to charge now</label>
+              <input
+                type="number" min={0} step={1}
+                value={tenderAmount}
+                onChange={e => setTenderAmount(e.target.value)}
+                placeholder={String(activeOrder ? Math.max(0, activeOrder.total - activeOrder.amount_paid) : total)}
+                className="input font-bold text-lg"
+              />
+            </div>
+          )}
 
           {/* Payment method buttons */}
-          <div className="grid grid-cols-4 gap-2 mt-1">
-            {PAYMENT_METHODS.map(m => (
+          <div className={`grid gap-2 mt-1 ${availableMethods.length === 5 ? 'grid-cols-5' : 'grid-cols-4'}`}>
+            {availableMethods.map(m => (
               <button
                 key={m}
                 onClick={() => setPaymentMethod(m)}
@@ -877,7 +1025,7 @@ export default function POSPage() {
                     : 'bg-surface-50 text-text-secondary hover:text-text-primary border border-border hover:border-brand/30'
                 }`}
               >
-                <span className="text-base">{m === 'Cash' ? '💵' : m === 'M-Pesa' ? '📱' : m === 'Card' ? '💳' : '🔀'}</span>
+                {m === 'Cash' ? <Banknote size={17} /> : m === 'M-Pesa' ? <Smartphone size={17} /> : m === 'Card' ? <CreditCard size={17} /> : m === 'Points' ? <Star size={17} /> : <Shuffle size={17} />}
                 {m}
               </button>
             ))}
@@ -915,6 +1063,89 @@ export default function POSPage() {
         </div>
       </div>
 
+      {/* ══════════════ Customer Picker Modal ══════════════ */}
+      {showCustomerPicker && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowCustomerPicker(false)}>
+          <div className="bg-surface-card border border-border rounded-2xl shadow-modal w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-border flex items-center justify-between">
+              <h2 className="font-bold text-base text-text-primary">Attach Customer</h2>
+              <button onClick={() => setShowCustomerPicker(false)} className="btn-ghost p-1 text-lg">×</button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+                <input
+                  autoFocus value={customerSearch} onChange={e => setCustomerSearch(e.target.value)}
+                  className="input pl-9" placeholder="Search by name or phone..."
+                />
+              </div>
+              <div className="max-h-64 overflow-y-auto space-y-1">
+                {searchingCustomers ? (
+                  <div className="flex justify-center py-6"><div className="w-5 h-5 border-2 border-border border-t-brand rounded-full animate-spin" /></div>
+                ) : customerResults.length === 0 ? (
+                  <p className="text-xs text-text-muted text-center py-6">
+                    {customerSearch.trim() ? 'No matching customers' : 'Type a name or phone number to search'}
+                  </p>
+                ) : customerResults.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => { setSelectedCustomer(c); setShowCustomerPicker(false); }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-50 transition-colors flex items-center justify-between"
+                  >
+                    <span className="text-sm font-medium text-text-primary">{c.full_name}</span>
+                    <span className="flex items-center gap-2 shrink-0">
+                      {c.phone && <span className="text-xs text-text-muted">{c.phone}</span>}
+                      {!!c.available_points && <span className="text-[11px] text-brand">{c.available_points} pts</span>}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => { setSelectedCustomer(null); setShowCustomerPicker(false); }} className="btn-secondary w-full text-sm">
+                Continue as Walk-in
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ Scan Modal ══════════════ */}
+      {showScanModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={closeScanModal}>
+          <div className="bg-surface-card border border-border rounded-2xl shadow-modal w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-border flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Scan size={16} className="text-brand" />
+                <h2 className="font-bold text-base text-text-primary">Scan Item</h2>
+              </div>
+              <button onClick={closeScanModal} className="btn-ghost p-1 text-lg">×</button>
+            </div>
+            <div className="p-5 space-y-3">
+              <input
+                autoFocus
+                value={scanInput}
+                onChange={e => setScanInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleScan(scanInput); }}
+                disabled={scanning}
+                className="input text-center font-mono tracking-wider"
+                placeholder="Scan or type a barcode…"
+              />
+              <p className="text-[11px] text-text-muted text-center">
+                Point a USB barcode scanner here and scan — it types the code and presses Enter automatically. You can also type a code by hand and press Enter.
+              </p>
+              {scanFeed.length > 0 && (
+                <div className="space-y-1 pt-2 border-t border-border max-h-40 overflow-y-auto">
+                  {scanFeed.map((entry, i) => (
+                    <p key={i} className={`text-xs ${entry.ok ? 'text-status-success' : 'text-status-error'}`}>
+                      {entry.ok ? '✓' : '✕'} {entry.text}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ══════════════ M-Pesa STK Push Modal ══════════════ */}
       {showMpesaModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -923,7 +1154,7 @@ export default function POSPage() {
             {/* Header */}
             <div className="p-5 border-b border-border flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-status-success/10 rounded-xl flex items-center justify-center text-xl">📱</div>
+                <div className="w-10 h-10 bg-status-success/10 rounded-xl flex items-center justify-center text-status-success"><Smartphone size={18} /></div>
                 <div>
                   <h2 className="font-bold text-base text-text-primary">M-Pesa Payment</h2>
                   <p className="text-xs text-text-muted">Lipa Na M-Pesa · STK Push</p>
@@ -974,7 +1205,7 @@ export default function POSPage() {
                   <div className="flex gap-3">
                     <button onClick={cancelMpesa} className="btn-secondary flex-1 py-3">Cancel</button>
                     <button onClick={sendStkPush} className="btn-primary flex-1 py-3 text-base font-bold flex items-center justify-center gap-2">
-                      📱 Send Push
+                      <Smartphone size={16} /> Send Push
                     </button>
                   </div>
                 </>
@@ -993,7 +1224,7 @@ export default function POSPage() {
               {mpesaStatus === 'waiting' && (
                 <div className="text-center space-y-4">
                   <div className="w-20 h-20 bg-brand/10 border-2 border-brand/20 rounded-full flex items-center justify-center mx-auto">
-                    <span className="text-4xl animate-bounce">📱</span>
+                    <Smartphone size={36} className="text-brand animate-bounce" />
                   </div>
                   <div>
                     <p className="font-bold text-lg text-text-primary">Check your phone!</p>
@@ -1108,8 +1339,10 @@ export default function POSPage() {
                       payment_method: 'split',
                       amount: order.total,
                       split_details: { parts: splitParts, per_person: Math.ceil(order.total / splitParts) },
+                      award_loyalty: awardLoyalty,
                     });
                     toast.success(`Split ${splitParts} ways — ${formatCurrency(Math.ceil(order.total / splitParts))} each`);
+                    if (res.data.points_awarded > 0) toast.success(`+${res.data.points_awarded} loyalty points earned`, { icon: '⭐' });
                     settleAfterPayment(order, res.data.balance_remaining);
                   } catch (e: unknown) {
                     const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Checkout failed';
@@ -1126,10 +1359,11 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* Printable receipt — auto-prints once `receiptOrder` is set (see
-          printReceipt / the auto-print useEffect above). Shared with
-          OrdersPage so both "just paid" (here) and "reprint a past order"
-          (there) render an identical receipt. */}
+      {/* Printable receipt — Receipt itself fires window.print() once its
+          settings fetch (business name/logo) actually completes, not on a
+          blind timeout from here. Shared with OrdersPage so both "just paid"
+          (here) and "reprint a past order" (there) render an identical
+          receipt. */}
       <Receipt order={receiptOrder} />
     </div>
   );

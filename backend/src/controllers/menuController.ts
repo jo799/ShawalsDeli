@@ -63,7 +63,7 @@ export const getCategories = async (_req: Request, res: Response): Promise<void>
 export const createMenuItem = async (req: Request, res: Response): Promise<void> => {
   try {
     const { name, description, price, cost, category_id, preparation_time, status, tags, image_url,
-            track_stock, stock_quantity, reorder_level } = req.body;
+            track_stock, stock_quantity, reorder_level, barcode } = req.body;
     if (!name || !name.toString().trim()) {
       res.status(400).json({ success: false, message: 'name is required' });
       return;
@@ -87,12 +87,20 @@ export const createMenuItem = async (req: Request, res: Response): Promise<void>
       res.status(400).json({ success: false, message: 'reorder_level must be a whole number, zero or more' });
       return;
     }
+    const trimmedBarcode = barcode ? String(barcode).trim() : null;
+    if (trimmedBarcode) {
+      const dupe = await query('SELECT id FROM menu_items WHERE barcode = $1', [trimmedBarcode]);
+      if (dupe.rows.length) {
+        res.status(400).json({ success: false, message: `Another item ("${dupe.rows[0].name || 'unknown'}") already uses that barcode` });
+        return;
+      }
+    }
     const result = await query(`
       INSERT INTO menu_items (name, description, price, cost, category_id, preparation_time, status, tags, image_url,
-        track_stock, stock_quantity, reorder_level)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *
+        track_stock, stock_quantity, reorder_level, barcode)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *
     `, [name.toString().trim(), description, numericPrice, cost || 0, category_id, preparation_time || 15, status || 'available', tags || [], image_url || null,
-        trackStock, stockQty, reorderLvl]);
+        trackStock, stockQty, reorderLvl, trimmedBarcode]);
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) {
     console.error(error);
@@ -104,7 +112,7 @@ export const updateMenuItem = async (req: AuthRequest, res: Response): Promise<v
   try {
     const { id } = req.params;
     const { name, description, price, cost, category_id, preparation_time, status, tags, image_url,
-            track_stock, stock_quantity, reorder_level } = req.body;
+            track_stock, stock_quantity, reorder_level, barcode } = req.body;
 
     const trackStock = track_stock === true;
     const stockQty = trackStock ? Number(stock_quantity) : 0;
@@ -116,6 +124,14 @@ export const updateMenuItem = async (req: AuthRequest, res: Response): Promise<v
     if (trackStock && (!Number.isInteger(reorderLvl) || reorderLvl < 0)) {
       res.status(400).json({ success: false, message: 'reorder_level must be a whole number, zero or more' });
       return;
+    }
+    const trimmedBarcode = barcode ? String(barcode).trim() : null;
+    if (trimmedBarcode) {
+      const dupe = await query('SELECT id, name FROM menu_items WHERE barcode = $1 AND id != $2', [trimmedBarcode, id]);
+      if (dupe.rows.length) {
+        res.status(400).json({ success: false, message: `Another item ("${dupe.rows[0].name}") already uses that barcode` });
+        return;
+      }
     }
 
     // Read the prior stock level so a manual count change from the edit form
@@ -132,10 +148,10 @@ export const updateMenuItem = async (req: AuthRequest, res: Response): Promise<v
     const result = await query(`
       UPDATE menu_items SET name=$1, description=$2, price=$3, cost=$4, category_id=$5,
         preparation_time=$6, status=$7, tags=$8, image_url=$9,
-        track_stock=$10, stock_quantity=$11, reorder_level=$12, updated_at=CURRENT_TIMESTAMP
-      WHERE id=$13 RETURNING *
+        track_stock=$10, stock_quantity=$11, reorder_level=$12, barcode=$13, updated_at=CURRENT_TIMESTAMP
+      WHERE id=$14 RETURNING *
     `, [name, description, price, cost, category_id, preparation_time, status, tags, image_url,
-        trackStock, stockQty, reorderLvl, id]);
+        trackStock, stockQty, reorderLvl, trimmedBarcode, id]);
     if (!result.rows.length) { res.status(404).json({ success: false, message: 'Item not found' }); return; }
 
     if (trackStock && stockQty !== priorQty) {
@@ -146,6 +162,28 @@ export const updateMenuItem = async (req: AuthRequest, res: Response): Promise<v
       );
     }
 
+    res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Real barcode lookup for POS's Scan feature — matches what a USB barcode
+// scanner types (it behaves as a keyboard, typing the code then Enter, not
+// a camera feed). Case-sensitive exact match; most retail barcodes are
+// purely numeric anyway, but this doesn't assume that.
+export const getMenuItemByBarcode = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { code } = req.params;
+    const result = await query(
+      `SELECT * FROM menu_items WHERE barcode = $1 AND status = 'available'`,
+      [code]
+    );
+    if (!result.rows.length) {
+      res.status(404).json({ success: false, message: `No available item found for barcode "${code}"` });
+      return;
+    }
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     console.error(error);

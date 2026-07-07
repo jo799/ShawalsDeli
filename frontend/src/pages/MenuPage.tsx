@@ -9,13 +9,13 @@ interface MenuItem {
   id: string; name: string; description: string; price: number; cost: number;
   category_id: string; category_name: string; image_url?: string;
   preparation_time: number; status: string; tags?: string[]; is_featured?: boolean;
-  track_stock?: boolean; stock_quantity?: number; reorder_level?: number;
+  track_stock?: boolean; stock_quantity?: number; reorder_level?: number; barcode?: string;
 }
 interface Category { id: string; name: string; item_count: number; }
 
 const EMPTY_ITEM = {
   name: '', description: '', price: 0, cost: 0, category_id: '', preparation_time: 15, status: 'available', tags: [] as string[], image_url: '',
-  track_stock: false, stock_quantity: 0, reorder_level: 5,
+  track_stock: false, stock_quantity: 0, reorder_level: 5, barcode: '',
 };
 
 export default function MenuPage() {
@@ -67,6 +67,7 @@ export default function MenuPage() {
         category_id: item.category_id, preparation_time: item.preparation_time, status: item.status,
         tags: item.tags || [], image_url: item.image_url || '',
         track_stock: item.track_stock || false, stock_quantity: item.stock_quantity ?? 0, reorder_level: item.reorder_level ?? 5,
+        barcode: item.barcode || '',
       });
       setSelected(item);
     } else {
@@ -370,6 +371,12 @@ export default function MenuPage() {
                   <span className="text-xs text-text-secondary capitalize">{formData.status}</span>
                 </div>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">Barcode (optional)</label>
+              <input value={formData.barcode} onChange={e => setFormData(p => ({...p, barcode: e.target.value}))} className="input" placeholder="Scan or type a barcode to link it to this item" />
+              <p className="text-[11px] text-text-muted mt-1">Lets a USB barcode scanner add this item directly at POS via the Scan button.</p>
             </div>
 
             {/* Countable stock — for pre-made finished goods sold as whole

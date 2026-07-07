@@ -18,7 +18,7 @@ const generateOrderNumber = () => {
 
 export const getOrders = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { status, type, date, page = 1, limit = 10, search } = req.query;
+    const { status, type, date, page = 1, limit = 10, search, sort, completed_date } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
     const conditions: string[] = [];
     const params: unknown[] = [];
@@ -35,6 +35,11 @@ export const getOrders = async (req: Request, res: Response): Promise<void> => {
     // day). DATE() itself has no timezone awareness — the correctness
     // entirely depends on what was written, not on anything in this query.
     if (date) { conditions.push(`DATE(o.created_at) = $${paramIdx++}`); params.push(date); }
+    // Same reasoning as the created_at filter above, applied to completed_at
+    // instead — needed so the Kitchen Display's "Completed" count can mean
+    // "completed today" rather than "completed ever", which is what a live
+    // ops screen should show, not an all-time historical total.
+    if (completed_date) { conditions.push(`DATE(o.completed_at) = $${paramIdx++}`); params.push(completed_date); }
     if (search) {
       conditions.push(`(o.order_number ILIKE $${paramIdx} OR o.customer_name ILIKE $${paramIdx} OR t.table_number ILIKE $${paramIdx})`);
       params.push(`%${search}%`); paramIdx++;
@@ -45,6 +50,21 @@ export const getOrders = async (req: Request, res: Response): Promise<void> => {
     const countResult = await query(`SELECT COUNT(*) FROM orders o LEFT JOIN restaurant_tables t ON o.table_id = t.id ${where}`, params);
     const total = parseInt(countResult.rows[0].count);
 
+    // Sorting by created_at (the default, and the only option before this)
+    // answers "what's newest" — but the Kitchen Display's Completed column
+    // needs "what finished most recently", which is a different question.
+    // An order created hours ago that just now got marked served should
+    // appear at the top of that list; sorting by created_at would leave it
+    // buried under everything created more recently regardless of when each
+    // one actually completed, and worse, a tightly-limited/paginated query
+    // sorted by created_at could omit it from the result set entirely.
+    // NULLS LAST matters here specifically: Postgres sorts NULLs as the
+    // "largest" value by default, so a plain `completed_at DESC` would put
+    // every non-completed order (completed_at is null) ahead of actually-
+    // completed ones. Harmless today since this is only ever paired with
+    // status=completed, but without this it'd be a landmine for whoever
+    // reuses sort=completed_at without that filter later.
+    const orderByColumn = sort === 'completed_at' ? 'o.completed_at DESC NULLS LAST' : 'o.created_at DESC';
     params.push(Number(limit), offset);
     const result = await query(`
       SELECT o.*, t.table_number, c.full_name as customer_full_name,
@@ -54,7 +74,7 @@ export const getOrders = async (req: Request, res: Response): Promise<void> => {
       LEFT JOIN customers c ON o.customer_id = c.id
       LEFT JOIN users u ON o.served_by = u.id
       ${where}
-      ORDER BY o.created_at DESC
+      ORDER BY ${orderByColumn}
       LIMIT $${paramIdx++} OFFSET $${paramIdx++}
     `, params);
 
@@ -118,8 +138,27 @@ export const getOrderById = async (req: Request, res: Response): Promise<void> =
     const itemsResult = await query('SELECT * FROM order_items WHERE order_id = $1', [id]);
     const paymentsResult = await query('SELECT * FROM payments WHERE order_id = $1', [id]);
     const refundsResult = await query('SELECT * FROM refunds WHERE order_id = $1 ORDER BY created_at DESC', [id]);
+    // Points earned on THIS order specifically — not the customer's running
+    // balance, which is a different question entirely (and would still be
+    // nonzero for a walk-in sale with no loyalty on it, since it's about the
+    // customer overall, not this transaction). Summed rather than assumed
+    // to be a single row since a refund can also touch loyalty_transactions
+    // (a negative 'earn'-adjacent entry) — see refundOrder below.
+    const loyaltyResult = await query(
+      `SELECT COALESCE(SUM(points), 0) as points FROM loyalty_transactions WHERE reference_id = $1 AND type = 'earn'`,
+      [id]
+    );
 
-    res.json({ success: true, data: { ...orderResult.rows[0], items: itemsResult.rows, payments: paymentsResult.rows, refunds: refundsResult.rows } });
+    res.json({
+      success: true,
+      data: {
+        ...orderResult.rows[0],
+        items: itemsResult.rows,
+        payments: paymentsResult.rows,
+        refunds: refundsResult.rows,
+        loyalty_points_earned: parseInt(loyaltyResult.rows[0].points) || 0,
+      },
+    });
   } catch (error) {
     console.error('Get order error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -355,26 +394,71 @@ export const processPayment = async (req: AuthRequest, res: Response): Promise<v
   try {
     await client.query('BEGIN');
     const { id } = req.params;
-    const { payment_method, amount, reference, split_details } = req.body;
+    const { payment_method, amount, reference, split_details, award_loyalty, points } = req.body;
 
-    if (!['cash', 'card', 'split'].includes(payment_method)) {
+    if (!['cash', 'card', 'split', 'points'].includes(payment_method)) {
       await client.query('ROLLBACK');
       res.status(400).json({
         success: false,
         message: payment_method === 'mpesa'
           ? 'Use /api/mpesa/stk-push for M-Pesa payments'
-          : 'payment_method must be one of: cash, card, split',
+          : 'payment_method must be one of: cash, card, split, points',
       });
       return;
     }
 
-    const numericAmount = Number(amount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      await client.query('ROLLBACK');
-      res.status(400).json({ success: false, message: 'amount must be a positive number' });
-      return;
+    // Points redemption is a payment METHOD, not a discount — the order's
+    // subtotal/total (what actually gets reported for tax purposes) never
+    // changes. It just contributes toward amount_paid the same way a cash
+    // tender does, except the "amount" is derived from a points count and
+    // the configured KES-per-point rate rather than typed in directly — a
+    // client-supplied amount is never trusted here, only points is.
+    let roundedAmount: number;
+    let pointsToRedeem = 0;
+    let pointValueKes = 1;
+    let customerIdForRedemption: string | null = null;
+
+    if (payment_method === 'points') {
+      const orderRes = await client.query('SELECT customer_id FROM orders WHERE id = $1', [id]);
+      if (!orderRes.rows.length) {
+        await client.query('ROLLBACK');
+        res.status(404).json({ success: false, message: 'Order not found' });
+        return;
+      }
+      customerIdForRedemption = orderRes.rows[0].customer_id;
+      if (!customerIdForRedemption) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ success: false, message: 'This order has no customer attached — attach a customer before redeeming their points' });
+        return;
+      }
+
+      pointsToRedeem = Math.trunc(Number(points));
+      if (!Number.isFinite(pointsToRedeem) || pointsToRedeem <= 0) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ success: false, message: 'points must be a positive whole number' });
+        return;
+      }
+
+      const lp = await client.query('SELECT available_points FROM loyalty_points WHERE customer_id = $1 FOR UPDATE', [customerIdForRedemption]);
+      const available = lp.rows[0]?.available_points || 0;
+      if (pointsToRedeem > available) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ success: false, message: `Customer only has ${available} points available` });
+        return;
+      }
+
+      const settingRes = await client.query(`SELECT value FROM settings WHERE key = 'loyalty_points_value_kes'`);
+      pointValueKes = parseFloat(settingRes.rows[0]?.value) || 1;
+      roundedAmount = Math.round(pointsToRedeem * pointValueKes * 100) / 100;
+    } else {
+      const numericAmount = Number(amount);
+      if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ success: false, message: 'amount must be a positive number' });
+        return;
+      }
+      roundedAmount = Math.round(numericAmount * 100) / 100;
     }
-    const roundedAmount = Math.round(numericAmount * 100) / 100;
 
     // applyPaymentToOrder owns the row lock, the balance check, the status
     // transition, stock deduction, and loyalty — the same logic path the
@@ -382,8 +466,13 @@ export const processPayment = async (req: AuthRequest, res: Response): Promise<v
     // a cash tender and an M-Pesa tender for the same order can never both
     // think they're "the payment that completes it" and double-award
     // loyalty or double-deduct stock, because they both go through this one
-    // locked function.
-    const outcome = await applyPaymentToOrder(client, id, roundedAmount, req.user!.id);
+    // locked function. A points tender exceeding the balance due is
+    // rejected here the same way an overpaid cash tender already is —
+    // there's no separate cap-and-adjust logic to get wrong.
+    const outcome = await applyPaymentToOrder(
+      client, id, roundedAmount, req.user!.id, award_loyalty !== false,
+      payment_method === 'points' ? roundedAmount : 0
+    );
 
     if (!outcome.found) {
       await client.query('ROLLBACK');
@@ -395,9 +484,27 @@ export const processPayment = async (req: AuthRequest, res: Response): Promise<v
       const message =
         outcome.reason === 'cancelled' ? 'Order is cancelled — cannot accept payment'
         : outcome.reason === 'already_paid' ? 'This order has already been paid in full'
-        : `Amount KES ${roundedAmount.toFixed(2)} exceeds the order balance due of KES ${outcome.balanceRemaining.toFixed(2)}`;
+        : payment_method === 'points'
+          ? `Redeeming ${pointsToRedeem} points (KES ${roundedAmount.toFixed(2)}) exceeds the order balance due of KES ${outcome.balanceRemaining.toFixed(2)} — use fewer points.`
+          : `Amount KES ${roundedAmount.toFixed(2)} exceeds the order balance due of KES ${outcome.balanceRemaining.toFixed(2)}`;
       res.status(400).json({ success: false, message });
       return;
+    }
+
+    // Only deduct the customer's points once we know the payment actually
+    // fit — same reasoning as recording the payments row below: never do
+    // the write before the validation that could still reject it.
+    if (payment_method === 'points' && customerIdForRedemption) {
+      await client.query(
+        `UPDATE loyalty_points SET available_points = available_points - $1, redeemed_points = redeemed_points + $1, updated_at = CURRENT_TIMESTAMP
+         WHERE customer_id = $2`,
+        [pointsToRedeem, customerIdForRedemption]
+      );
+      await client.query(
+        `INSERT INTO loyalty_transactions (customer_id, type, points, description, reference_id, performed_by)
+         VALUES ($1, 'redeem', $2, $3, $4, $5)`,
+        [customerIdForRedemption, -pointsToRedeem, `${pointsToRedeem} points redeemed toward order ${outcome.order.order_number}`, id, req.user!.id]
+      );
     }
 
     // Only record the payment row once we know it actually fit — recording
@@ -405,18 +512,19 @@ export const processPayment = async (req: AuthRequest, res: Response): Promise<v
     // dangling INSERT id `id` in error logs / sequences with nothing to show
     // for it, and there's no reason to do the write before the validation
     // that could reject it.
-    // Record payment as completed for cash/card/split. Split bill is
+    // Record payment as completed for cash/card/split/points. Split bill is
     // recorded as a single 'completed' payment for the full amount the
     // cashier collected — split_details is reference metadata only (how
     // many ways, per-person share) for the receipt, not separate payment
     // rows per person.
     const paymentResult = await client.query(`
-      INSERT INTO payments (order_id, payment_method, amount, status, reference, split_details, processed_by)
-      VALUES ($1,$2,$3,'completed',$4,$5,$6) RETURNING *
+      INSERT INTO payments (order_id, payment_method, amount, status, reference, split_details, points_redeemed, processed_by)
+      VALUES ($1,$2,$3,'completed',$4,$5,$6,$7) RETURNING *
     `, [
       id, payment_method, roundedAmount,
       reference || null,
       split_details ? JSON.stringify(split_details) : null,
+      payment_method === 'points' ? pointsToRedeem : null,
       req.user!.id,
     ]);
 
@@ -430,6 +538,7 @@ export const processPayment = async (req: AuthRequest, res: Response): Promise<v
       data: paymentResult.rows[0],
       order_status: outcome.order.status,
       balance_remaining: outcome.balanceRemaining,
+      points_awarded: outcome.pointsAwarded,
       ...(outcome.stockWarnings.length > 0 ? { stock_warnings: outcome.stockWarnings } : {}),
       message: !outcome.isFullyPaid
         ? `Partial payment recorded. KES ${outcome.balanceRemaining.toFixed(2)} still due.`

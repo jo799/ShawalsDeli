@@ -152,7 +152,7 @@ const getMpesaTimestamp = (): string => {
 
 export const initiateStkPush = async (req: AuthRequest, res: ExpressResponse): Promise<void> => {
   try {
-    const { order_id, phone, amount } = req.body;
+    const { order_id, phone, amount, award_loyalty } = req.body;
 
     if (!phone || amount === undefined || amount === null || !order_id) {
       res.status(400).json({ success: false, message: 'order_id, phone and amount are required' });
@@ -285,9 +285,9 @@ export const initiateStkPush = async (req: AuthRequest, res: ExpressResponse): P
     // doesn't respond; we mirror that with our own expiry so the sweep job
     // can mark it 'expired' even if Safaricom's callback never arrives.
     await query(`
-      INSERT INTO payments (order_id, payment_method, amount, status, reference, mpesa_phone, mpesa_merchant_request_id, expires_at, processed_by)
-      VALUES ($1, 'mpesa', $2, 'pending', $3, $4, $5, CURRENT_TIMESTAMP + INTERVAL '120 seconds', $6)
-    `, [order_id, amountInt, stkData.CheckoutRequestID, formattedPhone, stkData.MerchantRequestID, req.user!.id]);
+      INSERT INTO payments (order_id, payment_method, amount, status, reference, mpesa_phone, mpesa_merchant_request_id, expires_at, award_loyalty, processed_by)
+      VALUES ($1, 'mpesa', $2, 'pending', $3, $4, $5, CURRENT_TIMESTAMP + INTERVAL '120 seconds', $6, $7)
+    `, [order_id, amountInt, stkData.CheckoutRequestID, formattedPhone, stkData.MerchantRequestID, award_loyalty !== false, req.user!.id]);
 
     await query(
       `UPDATE orders SET status = 'awaiting_payment', updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND status = 'awaiting_payment'`,
@@ -466,7 +466,7 @@ const markPaymentCompleted = async (
     // that gets to decide the status transition and award loyalty; the
     // other sees the updated balance and acts accordingly. Neither path can
     // double-award points or double-deduct stock.
-    const outcome = await applyPaymentToOrder(client, payment.order_id, Number(resolvedPayment.amount), null);
+    const outcome = await applyPaymentToOrder(client, payment.order_id, Number(resolvedPayment.amount), null, resolvedPayment.award_loyalty !== false);
 
     if (outcome.found && !outcome.applied) {
       // The order was already fully settled (or cancelled) by the time this

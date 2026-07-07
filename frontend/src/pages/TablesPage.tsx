@@ -19,7 +19,7 @@ interface Reservation { id: string; table_id?: string; reservation_time: string;
 
 const STATUS_COLORS: Record<string, string> = {
   available: 'bg-status-success/20 border-status-success/40 text-status-success',
-  occupied:  'bg-status-error/20 border-status-error/40 text-white',
+  occupied:  'bg-status-error/20 border-status-error/40 text-status-error',
   reserved:  'bg-status-warning/20 border-status-warning/40 text-status-warning',
   cleaning:  'bg-status-purple/20 border-status-purple/40 text-status-purple',
 };
@@ -76,6 +76,13 @@ export default function TablesPage() {
   const [editingTable, setEditingTable] = useState<Table | null>(null); // null = adding a new table
   const [tableForm, setTableForm] = useState({ table_number: '', area: 'Main Hall', capacity: 2 });
   const [savingTable, setSavingTable] = useState(false);
+  const [defaultCapacity, setDefaultCapacity] = useState(2);
+  useEffect(() => {
+    api.get('/settings').then(r => {
+      const cap = parseInt(r.data.data.default_table_capacity);
+      if (cap > 0) setDefaultCapacity(cap);
+    }).catch(() => {});
+  }, []);
   // "Today" (default, a host-stand view of tonight) vs "View All" (every
   // upcoming confirmed/seated reservation regardless of date).
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
@@ -130,7 +137,7 @@ export default function TablesPage() {
   // ── Add / edit / remove tables from the floor plan ──────────────────────
   const openAddTable = () => {
     setEditingTable(null);
-    setTableForm({ table_number: '', area: areas[0] || 'Main Hall', capacity: 2 });
+    setTableForm({ table_number: '', area: areas[0] || 'Main Hall', capacity: defaultCapacity });
     setShowTableModal(true);
   };
 
