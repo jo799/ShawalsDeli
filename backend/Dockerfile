@@ -1,19 +1,20 @@
 FROM node:20-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
+WORKDIR /app/backend
+COPY backend/package*.json ./
 RUN npm ci
-COPY . .
+COPY backend/ ./
+COPY shared/ /app/shared/
 RUN npm run build
 
 FROM node:20-alpine AS production
-WORKDIR /app
+WORKDIR /app/backend
 ENV NODE_ENV=production
-COPY package*.json ./
+COPY backend/package*.json ./
 RUN npm ci --only=production && npm cache clean --force
-COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/backend/dist ./dist
 RUN mkdir -p uploads
 EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
   CMD node -e "require('http').get('http://localhost:5000/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"
 USER node
-CMD ["node", "dist/server.js"]
+CMD ["node", "dist/backend/src/server.js"]

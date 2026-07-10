@@ -5,6 +5,7 @@ import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency } from '@/lib/utils';
 import { PageHeader, StatusBadge, Modal } from '@/components/ui';
+import { useAuthStore } from '@/store/authStore';
 import toast from 'react-hot-toast';
 
 interface Table {
@@ -62,6 +63,9 @@ function TableCard({ table, selected, onClick }: { table: Table; selected: boole
 
 export default function TablesPage() {
   const navigate = useNavigate();
+  const { hasPermission } = useAuthStore();
+  const canManage = hasPermission('tables.manage');
+
   const [tables, setTables] = useState<Table[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [selected, setSelected] = useState<Table | null>(null);
@@ -258,12 +262,16 @@ export default function TablesPage() {
           <button className="btn-secondary flex items-center gap-2 text-sm">
             <LayoutGrid size={14} /> Table Layout
           </button>
-          <button onClick={openAddTable} className="btn-secondary flex items-center gap-2 text-sm">
-            <Plus size={14} /> Add Table
-          </button>
-          <button onClick={openReservationModal} className="btn-primary flex items-center gap-2 text-sm">
-            <Plus size={14} /> Add Reservation
-          </button>
+          {canManage && (
+            <button onClick={openAddTable} className="btn-secondary flex items-center gap-2 text-sm">
+              <Plus size={14} /> Add Table
+            </button>
+          )}
+          {canManage && (
+            <button onClick={openReservationModal} className="btn-primary flex items-center gap-2 text-sm">
+              <Plus size={14} /> Add Reservation
+            </button>
+          )}
         </PageHeader>
 
         {/* Stats */}
@@ -383,21 +391,23 @@ export default function TablesPage() {
                       <td className="table-cell"><StatusBadge status={r.status} /></td>
                       <td className="table-cell text-text-muted text-xs">{r.notes || '—'}</td>
                       <td className="table-cell">
-                        <div className="flex items-center gap-1">
-                          {r.status === 'confirmed' && (
-                            <>
-                              <button onClick={() => setReservationStatus(r, 'seated')} className="btn-ghost px-2 py-1 text-[11px] text-status-success">Seat</button>
-                              <button onClick={() => setReservationStatus(r, 'no_show', `Mark ${r.customer_name} as a no-show?`)} className="btn-ghost px-2 py-1 text-[11px] text-status-warning">No-show</button>
-                              <button onClick={() => setReservationStatus(r, 'cancelled', `Cancel this reservation for ${r.customer_name}?`)} className="btn-ghost px-2 py-1 text-[11px] text-status-error">Cancel</button>
-                            </>
-                          )}
-                          {r.status === 'seated' && (
-                            <button onClick={() => setReservationStatus(r, 'completed')} className="btn-ghost px-2 py-1 text-[11px] text-status-success">Complete</button>
-                          )}
-                          {['completed','cancelled','no_show'].includes(r.status) && (
-                            <span className="text-text-muted text-[11px]">—</span>
-                          )}
-                        </div>
+                        {canManage && (
+                          <div className="flex items-center gap-1">
+                            {r.status === 'confirmed' && (
+                              <>
+                                <button onClick={() => setReservationStatus(r, 'seated')} className="btn-ghost px-2 py-1 text-[11px] text-status-success">Seat</button>
+                                <button onClick={() => setReservationStatus(r, 'no_show', `Mark ${r.customer_name} as a no-show?`)} className="btn-ghost px-2 py-1 text-[11px] text-status-warning">No-show</button>
+                                <button onClick={() => setReservationStatus(r, 'cancelled', `Cancel this reservation for ${r.customer_name}?`)} className="btn-ghost px-2 py-1 text-[11px] text-status-error">Cancel</button>
+                              </>
+                            )}
+                            {r.status === 'seated' && (
+                              <button onClick={() => setReservationStatus(r, 'completed')} className="btn-ghost px-2 py-1 text-[11px] text-status-success">Complete</button>
+                            )}
+                            {['completed','cancelled','no_show'].includes(r.status) && (
+                              <span className="text-text-muted text-[11px]">—</span>
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -414,13 +424,17 @@ export default function TablesPage() {
           <div className="p-4 border-b border-border flex items-center justify-between">
             <h2 className="section-title">Selected Table</h2>
             <div className="flex items-center gap-1">
-              <button onClick={() => openEditTable(selected)} className="btn-ghost p-1 text-xs" title="Edit table">✏️</button>
-              <button
-                onClick={() => deleteTable(selected)}
-                disabled={selected.status === 'occupied'}
-                className="btn-ghost p-1 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
-                title={selected.status === 'occupied' ? 'Clear the table before removing it' : 'Remove table'}
-              >🗑️</button>
+              {canManage && (
+                <>
+                  <button onClick={() => openEditTable(selected)} className="btn-ghost p-1 text-xs" title="Edit table">✏️</button>
+                  <button
+                    onClick={() => deleteTable(selected)}
+                    disabled={selected.status === 'occupied'}
+                    className="btn-ghost p-1 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+                    title={selected.status === 'occupied' ? 'Clear the table before removing it' : 'Remove table'}
+                  >🗑️</button>
+                </>
+              )}
               <button onClick={() => setSelected(null)} className="btn-ghost p-1 text-lg">×</button>
             </div>
           </div>
@@ -482,10 +496,10 @@ export default function TablesPage() {
                 {[
                   { icon: '🛒', label: 'Add Order', onClick: () => navigate('/pos') },
                   { icon: '⇄', label: 'Transfer', onClick: () => toast('Transferring a table isn\'t built yet — coming in a future update.', { icon: 'ℹ️' }) },
-                  { icon: '📋', label: 'Split Bill', onClick: () => navigate('/pos') }, // Split Bill lives in the POS checkout flow
+                  { icon: '📋', label: 'Split Bill', onClick: () => navigate('/pos') },
                   { icon: '⊞', label: 'Merge Table', onClick: () => toast('Merging tables isn\'t built yet — coming in a future update.', { icon: 'ℹ️' }) },
                   { icon: '🖨', label: 'Print Bill', onClick: () => toast('Print this from the Orders page once the order is selected.', { icon: 'ℹ️' }) },
-                  { icon: '✕', label: 'Close Table', danger: true, onClick: () => closeTable(selected) },
+                  ...(canManage ? [{ icon: '✕', label: 'Close Table', danger: true, onClick: () => closeTable(selected) }] : []),
                 ].map(action => (
                   <button key={action.label}
                     onClick={action.onClick}

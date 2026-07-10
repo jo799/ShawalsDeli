@@ -31,6 +31,42 @@ const seed = async () => {
       ON CONFLICT (email) DO NOTHING
     `, [passwordHash]);
 
+    // Seed staff schedules for the current week (Mon–Sun)
+    const weekStart = new Date();
+    const dayOfWeek = weekStart.getDay();
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    weekStart.setDate(weekStart.getDate() + mondayOffset);
+    weekStart.setHours(0, 0, 0, 0);
+
+    const defaultSchedule: Record<string, string[]> = {
+      administrator: ['day', 'day', 'off', 'day', 'day', 'day', 'off'],
+      manager: ['day', 'day', 'day', 'day', 'day', 'day', 'off'],
+      head_chef: ['morning', 'morning', 'morning', 'off', 'morning', 'morning', 'off'],
+      cashier: ['day', 'day', 'day', 'day', 'off', 'day', 'off'],
+      waiter: ['evening', 'evening', 'evening', 'evening', 'evening', 'off', 'off'],
+      kitchen_staff: ['morning', 'morning', 'morning', 'morning', 'morning', 'off', 'off'],
+      cleaner: ['day', 'day', 'off', 'day', 'day', 'day', 'off'],
+    };
+    const roleLabels: Record<string, string> = {
+      administrator: 'Administrator', manager: 'Manager', head_chef: 'Head Chef',
+      cashier: 'Cashier', waiter: 'Waiter', kitchen_staff: 'Kitchen Staff', cleaner: 'Cleaner',
+    };
+
+    const activeStaff = await client.query(`SELECT id, role FROM users WHERE status = 'active'`);
+    for (const member of activeStaff.rows) {
+      const pattern = defaultSchedule[member.role] || defaultSchedule.waiter;
+      for (let i = 0; i < 7; i++) {
+        const shiftDate = new Date(weekStart);
+        shiftDate.setDate(weekStart.getDate() + i);
+        const dateStr = `${shiftDate.getFullYear()}-${String(shiftDate.getMonth() + 1).padStart(2, '0')}-${String(shiftDate.getDate()).padStart(2, '0')}`;
+        await client.query(`
+          INSERT INTO staff_schedules (user_id, shift_date, shift_type, role_label)
+          VALUES ($1, $2::date, $3, $4)
+          ON CONFLICT (user_id, shift_date) DO NOTHING
+        `, [member.id, dateStr, pattern[i], roleLabels[member.role] || 'Staff']);
+      }
+    }
+
     // Seed menu categories
     await client.query(`
       INSERT INTO menu_categories (name, description, sort_order) VALUES

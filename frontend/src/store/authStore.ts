@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import type { Permission } from '@shared/permissions';
+import { getPermissionsForRole } from '@shared/permissions';
 
 interface User {
   id: string;
@@ -11,23 +13,61 @@ interface User {
 interface AuthState {
   user: User | null;
   token: string | null;
+  permissions: Permission[];
   isAuthenticated: boolean;
-  login: (user: User, token: string) => void;
+  login: (user: User, token: string, permissions?: Permission[]) => void;
+  setSession: (user: User, permissions: Permission[]) => void;
   logout: () => void;
+  hasPermission: (permission: Permission) => boolean;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
-  user: (() => { try { const u = localStorage.getItem('user'); return u ? JSON.parse(u) : null; } catch { return null; } })(),
+function loadStoredUser(): User | null {
+  try {
+    const u = localStorage.getItem('user');
+    return u ? JSON.parse(u) : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadStoredPermissions(user: User | null): Permission[] {
+  try {
+    const stored = localStorage.getItem('permissions');
+    if (stored) return JSON.parse(stored);
+  } catch {
+    // fall through
+  }
+  return user ? getPermissionsForRole(user.role) : [];
+}
+
+const initialUser = loadStoredUser();
+
+export const useAuthStore = create<AuthState>((set, get) => ({
+  user: initialUser,
   token: localStorage.getItem('token'),
+  permissions: loadStoredPermissions(initialUser),
   isAuthenticated: !!localStorage.getItem('token'),
-  login: (user, token) => {
+  login: (user, token, permissions) => {
+    const resolved = permissions ?? getPermissionsForRole(user.role);
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(user));
-    set({ user, token, isAuthenticated: true });
+    localStorage.setItem('permissions', JSON.stringify(resolved));
+    set({ user, token, permissions: resolved, isAuthenticated: true });
+  },
+  setSession: (user, permissions) => {
+    localStorage.setItem('user', JSON.stringify(user));
+    localStorage.setItem('permissions', JSON.stringify(permissions));
+    set({ user, permissions });
   },
   logout: () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    set({ user: null, token: null, isAuthenticated: false });
+    localStorage.removeItem('permissions');
+    set({ user: null, token: null, permissions: [], isAuthenticated: false });
+  },
+  hasPermission: (permission) => {
+    const { permissions, user } = get();
+    if (permissions.length > 0) return permissions.includes(permission);
+    return getPermissionsForRole(user?.role ?? '').includes(permission);
   },
 }));

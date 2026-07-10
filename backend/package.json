@@ -2,11 +2,11 @@
   "name": "shawalsdeli-backend",
   "version": "1.0.0",
   "description": "Shawal's Deli Backend API",
-  "main": "dist/server.js",
+  "main": "dist/backend/src/server.js",
  "scripts": {
   "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
   "build": "tsc",
-  "start": "node dist/server.js",
+  "start": "node dist/backend/src/server.js",
   "db:migrate": "node -r ts-node/register src/migrations/migrate.ts",
   "db:seed": "node -r ts-node/register src/seeders/seed.ts",
   "db:reset": "node -r ts-node/register src/migrations/reset.ts"
