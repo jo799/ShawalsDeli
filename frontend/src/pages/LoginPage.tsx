@@ -158,7 +158,7 @@ export default function LoginPage() {
       </div>
 
       {/* Right panel - Login form */}
-      <div className="w-full lg:w-[480px] flex items-center justify-center p-8 bg-surface-card">
+      <div className="w-full lg:w-[480px] flex items-center justify-center p-4 sm:p-8 bg-surface-card">
         <div className="w-full max-w-sm">
           <div className="lg:hidden mb-8 text-center">
             <img src="/logo.png" alt="Shawal's Deli" className="w-48 max-w-full mx-auto" />

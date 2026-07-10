@@ -1,6 +1,4 @@
 import { create } from 'zustand';
-import type { Permission } from '@shared/permissions';
-import { getPermissionsForRole } from '@shared/permissions';
 
 interface User {
   id: string;
@@ -10,64 +8,44 @@ interface User {
   avatar_url?: string;
 }
 
+// 'resource.action' strings, checked against the same role boundaries the
+// backend already enforces (see backend/src/routes/index.ts) — this exists
+// so the UI can hide a button someone can't actually use, rather than
+// showing it and letting them discover that the hard way via a 403.
+// administrator implicitly passes every check; everyone else needs an
+// explicit entry below.
+const PERMISSIONS: Record<string, string[]> = {
+  'expenses.manage': ['administrator', 'manager'],
+};
+
+function checkPermission(role: string | undefined, permission: string): boolean {
+  if (!role) return false;
+  if (role === 'administrator') return true;
+  return PERMISSIONS[permission]?.includes(role) ?? false;
+}
+
 interface AuthState {
   user: User | null;
   token: string | null;
-  permissions: Permission[];
   isAuthenticated: boolean;
-  login: (user: User, token: string, permissions?: Permission[]) => void;
-  setSession: (user: User, permissions: Permission[]) => void;
+  login: (user: User, token: string) => void;
   logout: () => void;
-  hasPermission: (permission: Permission) => boolean;
+  hasPermission: (permission: string) => boolean;
 }
-
-function loadStoredUser(): User | null {
-  try {
-    const u = localStorage.getItem('user');
-    return u ? JSON.parse(u) : null;
-  } catch {
-    return null;
-  }
-}
-
-function loadStoredPermissions(user: User | null): Permission[] {
-  try {
-    const stored = localStorage.getItem('permissions');
-    if (stored) return JSON.parse(stored);
-  } catch {
-    // fall through
-  }
-  return user ? getPermissionsForRole(user.role) : [];
-}
-
-const initialUser = loadStoredUser();
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  user: initialUser,
+  user: (() => { try { const u = localStorage.getItem('user'); return u ? JSON.parse(u) : null; } catch { return null; } })(),
   token: localStorage.getItem('token'),
-  permissions: loadStoredPermissions(initialUser),
   isAuthenticated: !!localStorage.getItem('token'),
-  login: (user, token, permissions) => {
-    const resolved = permissions ?? getPermissionsForRole(user.role);
+  login: (user, token) => {
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(user));
-    localStorage.setItem('permissions', JSON.stringify(resolved));
-    set({ user, token, permissions: resolved, isAuthenticated: true });
-  },
-  setSession: (user, permissions) => {
-    localStorage.setItem('user', JSON.stringify(user));
-    localStorage.setItem('permissions', JSON.stringify(permissions));
-    set({ user, permissions });
+    set({ user, token, isAuthenticated: true });
   },
   logout: () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    localStorage.removeItem('permissions');
-    set({ user: null, token: null, permissions: [], isAuthenticated: false });
+    set({ user: null, token: null, isAuthenticated: false });
   },
-  hasPermission: (permission) => {
-    const { permissions, user } = get();
-    if (permissions.length > 0) return permissions.includes(permission);
-    return getPermissionsForRole(user?.role ?? '').includes(permission);
-  },
+  hasPermission: (permission) => checkPermission(get().user?.role, permission),
 }));

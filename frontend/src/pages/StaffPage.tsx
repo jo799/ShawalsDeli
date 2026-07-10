@@ -425,7 +425,7 @@ export default function StaffPage() {
       {/* Add / Edit Staff Modal */}
       <Modal open={showAdd} onClose={() => setShowAdd(false)} title={editingId ? 'Edit Staff Member' : 'Add Staff Member'} size="md">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="col-span-2">
               <label className="block text-xs text-text-muted mb-1">Full Name *</label>
               <input className="input" value={form.full_name} onChange={e => setForm(p => ({ ...p, full_name: e.target.value }))} placeholder="Enter full name" />

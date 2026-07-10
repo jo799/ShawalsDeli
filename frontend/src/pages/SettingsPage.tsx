@@ -275,7 +275,7 @@ export default function SettingsPage() {
     <div className="flex h-full overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-surface-card">
+        <div className="flex items-center justify-between flex-wrap gap-2 px-4 md:px-6 py-4 border-b border-border bg-surface-card">
           <div>
             <h1 className="text-xl font-bold text-text-primary">Settings</h1>
             <p className="text-xs text-text-muted">Manage your system preferences and configurations</p>
@@ -293,7 +293,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-border bg-surface-card px-6 overflow-x-auto">
+        <div className="flex border-b border-border bg-surface-card px-4 md:px-6 overflow-x-auto">
           {TABS.map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               className={`px-4 py-3 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${activeTab === tab ? 'border-brand text-brand' : 'border-transparent text-text-muted hover:text-text-primary'}`}>
@@ -303,9 +303,9 @@ export default function SettingsPage() {
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6">
           {activeTab === 'General' && (
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Left */}
               <div className="space-y-6">
                 <div className="card p-4">
@@ -334,7 +334,7 @@ export default function SettingsPage() {
                 {/* Business Profile */}
                 <div>
                   <h2 className="section-title mb-4">Business Profile</h2>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs text-text-muted mb-1">Business Name</label>
                       <input className="input" value={business.business_name} onChange={e => setBusiness(p => ({ ...p, business_name: e.target.value }))} />
@@ -377,7 +377,7 @@ export default function SettingsPage() {
                 {/* Preference cards */}
                 <div>
                   <h2 className="section-title mb-3">Preferences</h2>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <PreferenceCard icon="🧾" label="Receipt Settings" description="Customize receipt footer and details shown" onClick={() => setShowReceiptModal(true)} />
                     <PreferenceCard icon="📄" label="Invoice Settings" description="Customize purchase order numbering and footer note" onClick={() => setShowInvoiceModal(true)} />
                     <PreferenceCard icon="🖥️" label="Kitchen Display Settings" description="Auto-refresh interval and new-order sound alert" onClick={() => setShowKdsModal(true)} />
@@ -479,7 +479,7 @@ export default function SettingsPage() {
             <div className="max-w-2xl space-y-6">
               <h2 className="section-title">Business Settings</h2>
               <p className="text-xs text-text-muted -mt-3">Same fields as General → Business Profile — shown here too since some people look for them under this tab.</p>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {[
                   { label: 'Business Name', key: 'business_name', type: 'text' },
                   { label: 'Business Email', key: 'business_email', type: 'email' },

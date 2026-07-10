@@ -29,15 +29,6 @@ export const formatDateTime = (date: string | Date): string =>
 export const toLocalDateString = (d: Date = new Date()): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-/** Normalize API date values (DATE columns often arrive as ISO timestamps) to YYYY-MM-DD. */
-export const normalizeScheduleDate = (value: string | Date | null | undefined): string => {
-  if (!value) return '';
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return toLocalDateString(d);
-};
-
 export const getInitials = (name: string): string =>
   name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
 

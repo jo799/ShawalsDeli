@@ -4,7 +4,6 @@ import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, cn, resolveMenuImage, menuImagePlaceholder } from '@/lib/utils';
 import { PageHeader, StatusBadge, Modal, LoadingPage } from '@/components/ui';
-import { useAuthStore } from '@/store/authStore';
 import toast from 'react-hot-toast';
 
 interface MenuItem {
@@ -21,9 +20,6 @@ const EMPTY_ITEM = {
 };
 
 export default function MenuPage() {
-  const { hasPermission } = useAuthStore();
-  const canManage = hasPermission('menu.manage');
-
   const [items, setItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null); // null = "All Items"
@@ -167,11 +163,9 @@ export default function MenuPage() {
         <PageHeader title="Menu" subtitle="Manage your menu items, categories and modifiers">
           <button className="btn-secondary text-sm">Categories</button>
           <button className="btn-secondary text-sm">Modifiers</button>
-          {canManage && (
-            <button onClick={() => openEdit()} className="btn-primary flex items-center gap-2 text-sm">
-              <Plus size={14} /> Add Menu Item
-            </button>
-          )}
+          <button onClick={() => openEdit()} className="btn-primary flex items-center gap-2 text-sm">
+            <Plus size={14} /> Add Menu Item
+          </button>
         </PageHeader>
 
         {/* Category tabs */}
@@ -247,14 +241,12 @@ export default function MenuPage() {
                         <StatusBadge status={item.status} label={item.status === 'available' ? '● Available' : item.status} />
                         <StockBadge item={item} />
                       </div>
-                      {canManage && (
-                        <div className="flex gap-1">
-                          <button onClick={() => openEdit(item)} className="btn-ghost p-1"><Edit2 size={12} /></button>
-                          {item.status === 'archived'
-                            ? <button onClick={() => restoreItem(item)} className="btn-ghost p-1 hover:text-status-success" title="Restore"><RotateCcw size={12} /></button>
-                            : <button onClick={() => deleteItem(item.id)} className="btn-ghost p-1 hover:text-status-error" title="Delete"><Trash2 size={12} /></button>}
-                        </div>
-                      )}
+                      <div className="flex gap-1">
+                        <button onClick={() => openEdit(item)} className="btn-ghost p-1"><Edit2 size={12} /></button>
+                        {item.status === 'archived'
+                          ? <button onClick={() => restoreItem(item)} className="btn-ghost p-1 hover:text-status-success" title="Restore"><RotateCcw size={12} /></button>
+                          : <button onClick={() => deleteItem(item.id)} className="btn-ghost p-1 hover:text-status-error" title="Delete"><Trash2 size={12} /></button>}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -295,14 +287,12 @@ export default function MenuPage() {
                     <td className="table-cell text-text-muted">{formatCurrency(item.cost)}</td>
                     <td className="table-cell"><div className="flex items-center gap-1.5"><StatusBadge status={item.status} /><StockBadge item={item} /></div></td>
                     <td className="table-cell">
-                      {canManage && (
-                        <div className="flex gap-1">
-                          <button onClick={() => openEdit(item)} className="btn-ghost p-1"><Edit2 size={13} /></button>
-                          {item.status === 'archived'
-                            ? <button onClick={() => restoreItem(item)} className="btn-ghost p-1 hover:text-status-success" title="Restore"><RotateCcw size={13} /></button>
-                            : <button onClick={() => deleteItem(item.id)} className="btn-ghost p-1 hover:text-status-error" title="Delete"><Trash2 size={13} /></button>}
-                        </div>
-                      )}
+                      <div className="flex gap-1">
+                        <button onClick={() => openEdit(item)} className="btn-ghost p-1"><Edit2 size={13} /></button>
+                        {item.status === 'archived'
+                          ? <button onClick={() => restoreItem(item)} className="btn-ghost p-1 hover:text-status-success" title="Restore"><RotateCcw size={13} /></button>
+                          : <button onClick={() => deleteItem(item.id)} className="btn-ghost p-1 hover:text-status-error" title="Delete"><Trash2 size={13} /></button>}
+                      </div>
                     </td>
                   </tr>
                 ))}

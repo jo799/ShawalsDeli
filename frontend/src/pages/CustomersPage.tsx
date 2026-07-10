@@ -263,7 +263,7 @@ export default function CustomersPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 text-xs text-text-muted gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 text-xs text-text-muted gap-2">
               <div><span className="block">Customer Since</span><span className="font-medium text-text-primary">{selected.created_at ? formatDate(selected.created_at) : '—'}</span></div>
               <div><span className="block">Last Visit</span><span className="font-medium text-text-primary">{selected.last_visit ? formatDate(selected.last_visit) : '—'}</span></div>
               <div><span className="block">Customer ID</span><span className="font-medium text-text-primary">{selected.customer_code}</span></div>
@@ -285,7 +285,7 @@ export default function CustomersPage() {
               {/* Stats cards — real numbers only. This used to include a
                   fabricated "Last 3 Months" figure (total_spent * 0.34 with
                   a hardcoded "+18.6%") with nothing behind it. */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {[
                   { label: 'Total Visits', Icon: ShoppingCart, value: selected.total_orders || 0, color: 'bg-status-info/10 text-status-info' },
                   { label: 'Total Spent', Icon: Wallet, value: formatCurrency(selected.total_spent || 0), color: 'bg-status-success/10 text-status-success' },
@@ -467,8 +467,8 @@ export default function CustomersPage() {
       {/* Add / Edit Customer Modal */}
       <Modal open={showAdd} onClose={() => setShowAdd(false)} title={editingId ? 'Edit Customer' : 'Add Customer'}>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="col-span-1 sm:col-span-2">
               <label className="block text-xs text-text-muted mb-1">Full Name *</label>
               <input className="input" value={form.full_name} onChange={e => setForm(p => ({ ...p, full_name: e.target.value }))} placeholder="Enter full name" />
             </div>

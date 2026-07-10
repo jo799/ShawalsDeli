@@ -88,8 +88,8 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen bg-surface-300 flex items-center justify-center p-8">
-      <div className="w-full max-w-sm bg-surface-card rounded-2xl border border-border p-8">
+    <div className="min-h-screen bg-surface-300 flex items-center justify-center p-4 sm:p-8">
+      <div className="w-full max-w-sm bg-surface-card rounded-2xl border border-border p-5 sm:p-8">
         <div className="text-center mb-6">
           <img src="/logo.png" alt="Shawal's Deli" className="w-40 max-w-full mx-auto" />
         </div>

@@ -40,9 +40,10 @@ const CategoryIcon = ({ category, size = 16 }: { category?: string; size?: numbe
 };
 
 export default function InventoryPage() {
-  const { hasPermission } = useAuthStore();
-  const canManage = hasPermission('inventory.manage');
-  const canAdjust = hasPermission('inventory.adjust');
+  const { user } = useAuthStore();
+  // Add/edit/delete are restricted server-side to admin/manager (routes/index.ts)
+  // — gate the UI the same way so cashiers don't hit a confusing 403.
+  const canManage = user?.role === 'administrator' || user?.role === 'manager';
 
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [selected, setSelected] = useState<InventoryItem | null>(null);
@@ -200,12 +201,10 @@ export default function InventoryPage() {
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Inventory" subtitle="Track and manage your stock items in real-time">
-          {canAdjust && (
-            <button onClick={() => { if (selected) setShowAdjust(true); else toast.error('Select an item first'); }}
-              className="btn-secondary flex items-center gap-2 text-sm">
-              <ArrowLeftRight size={14} /> Adjust Stock
-            </button>
-          )}
+          <button onClick={() => { if (selected) setShowAdjust(true); else toast.error('Select an item first'); }}
+            className="btn-secondary flex items-center gap-2 text-sm">
+            <ArrowLeftRight size={14} /> Adjust Stock
+          </button>
           <button onClick={() => toast('Moving stock between locations isn\'t built yet — coming in a future update.', { icon: 'ℹ️' })}
             className="btn-secondary flex items-center gap-2 text-sm">
             <ArrowLeftRight size={14} /> Stock Transfer
@@ -303,10 +302,8 @@ export default function InventoryPage() {
                             <button onClick={e => { e.stopPropagation(); openEditItem(item); }}
                               className="btn-ghost p-1 text-brand" title="Edit item details"><Edit2 size={13} /></button>
                           )}
-                          {canAdjust && (
-                            <button onClick={e => { e.stopPropagation(); selectItem(item); setShowAdjust(true); }}
-                              className="btn-ghost p-1" title="Adjust Stock"><ArrowLeftRight size={13} /></button>
-                          )}
+                          <button onClick={e => { e.stopPropagation(); selectItem(item); setShowAdjust(true); }}
+                            className="btn-ghost p-1" title="Adjust Stock"><ArrowLeftRight size={13} /></button>
                           {canManage && (
                             <button onClick={e => { e.stopPropagation(); deleteItem(item); }}
                               className="btn-ghost p-1 text-status-error" title="Remove item"><Trash2 size={13} /></button>
@@ -367,11 +364,9 @@ export default function InventoryPage() {
             </div>
 
             <div className="flex gap-2 mt-4">
-              {canAdjust && (
-                <button onClick={() => setShowAdjust(true)} className="btn-secondary flex-1 text-xs py-1.5 flex items-center justify-center gap-1">
-                  <ArrowLeftRight size={12} /> Adjust Stock
-                </button>
-              )}
+              <button onClick={() => setShowAdjust(true)} className="btn-secondary flex-1 text-xs py-1.5 flex items-center justify-center gap-1">
+                <ArrowLeftRight size={12} /> Adjust Stock
+              </button>
               {canManage && (
                 <button onClick={() => openEditItem(selected)} className="btn-primary flex-1 text-xs py-1.5 flex items-center justify-center gap-1">
                   <Edit2 size={12} /> Edit Item
@@ -472,7 +467,7 @@ export default function InventoryPage() {
 
       {/* Add / Edit Item Modal */}
       <Modal open={showAdd} onClose={() => setShowAdd(false)} title={editingItem ? `Edit ${editingItem.name}` : 'Add Inventory Item'} size="lg">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {[
             { label: 'SKU *', key: 'sku', placeholder: 'ING-XXXX' },
             { label: 'Item Name *', key: 'name', placeholder: 'e.g. Rice' },

@@ -6,6 +6,7 @@ import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, formatDate, toLocalDateString } from '@/lib/utils';
 import { PageHeader, Pagination, SearchInput, LoadingPage, Modal } from '@/components/ui';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import { useAuthStore } from '@/store/authStore';
 import toast from 'react-hot-toast';
 
 interface Expense {
@@ -32,6 +33,8 @@ const PAYMENT_METHODS = ['cash', 'mpesa', 'bank_transfer', 'card'];
 const EMPTY_FORM = { title: '', category_id: '', vendor: '', amount: '', payment_method: 'bank_transfer', expense_date: toLocalDateString(), notes: '', reference_no: '' };
 
 export function ExpensesPage() {
+  const { hasPermission } = useAuthStore();
+  const canManage = hasPermission('expenses.manage');
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [byCategory, setByCategory] = useState<Array<{ name: string; total: number; color?: string }>>([]);
@@ -168,7 +171,7 @@ export function ExpensesPage() {
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Expenses" subtitle="Track and manage business expenses">
           <button onClick={exportCsv} disabled={expenses.length === 0} className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50"><Download size={13} /> Export</button>
-          <button onClick={openAdd} className="btn-primary flex items-center gap-2 text-sm"><Plus size={14} /> Add Expense</button>
+          {canManage && <button onClick={openAdd} className="btn-primary flex items-center gap-2 text-sm"><Plus size={14} /> Add Expense</button>}
         </PageHeader>
 
         {/* Stats — every number here is real now. "This Month" used to show
@@ -253,19 +256,21 @@ export function ExpensesPage() {
                       <td className="table-cell" onClick={e => e.stopPropagation()}>
                         {exp.receipt_url ? (
                           <a href={exp.receipt_url} target="_blank" rel="noreferrer" className="btn-ghost p-1 inline-flex" title="View receipt"><FileText size={14} className="text-status-info" /></a>
-                        ) : (
+                        ) : canManage ? (
                           <label className={`btn-ghost p-1 inline-flex cursor-pointer ${uploadingReceiptFor === exp.id ? 'opacity-50 pointer-events-none' : ''}`} title="Upload receipt">
                             <Upload size={14} />
                             <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden"
                               onChange={e => { const f = e.target.files?.[0]; if (f) handleReceiptUpload(exp.id, f); e.target.value = ''; }} />
                           </label>
-                        )}
+                        ) : <span className="text-text-muted text-xs">—</span>}
                       </td>
                       <td className="table-cell" onClick={e => e.stopPropagation()}>
-                        <div className="flex gap-1">
-                          <button onClick={() => openEdit(exp)} className="btn-ghost p-1"><Edit2 size={13} /></button>
-                          <button onClick={() => deleteExpense(exp)} className="btn-ghost p-1 text-status-error"><Trash2 size={13} /></button>
-                        </div>
+                        {canManage ? (
+                          <div className="flex gap-1">
+                            <button onClick={() => openEdit(exp)} className="btn-ghost p-1"><Edit2 size={13} /></button>
+                            <button onClick={() => deleteExpense(exp)} className="btn-ghost p-1 text-status-error"><Trash2 size={13} /></button>
+                          </div>
+                        ) : <span className="text-text-muted text-xs">—</span>}
                       </td>
                     </tr>
                   ))}
@@ -312,10 +317,12 @@ export function ExpensesPage() {
                 </a>
               )}
             </div>
-            <div className="flex gap-2 mt-4">
-              <button onClick={() => openEdit(selectedExpense)} className="btn-secondary flex-1 text-xs py-2 flex items-center justify-center gap-1"><Edit2 size={12} /> Edit</button>
-              <button onClick={() => deleteExpense(selectedExpense)} className="btn-secondary flex-1 text-xs py-2 flex items-center justify-center gap-1 text-status-error border-status-error/30"><Trash2 size={12} /> Delete</button>
-            </div>
+            {canManage && (
+              <div className="flex gap-2 mt-4">
+                <button onClick={() => openEdit(selectedExpense)} className="btn-secondary flex-1 text-xs py-2 flex items-center justify-center gap-1"><Edit2 size={12} /> Edit</button>
+                <button onClick={() => deleteExpense(selectedExpense)} className="btn-secondary flex-1 text-xs py-2 flex items-center justify-center gap-1 text-status-error border-status-error/30"><Trash2 size={12} /> Delete</button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="p-4">
@@ -356,8 +363,8 @@ export function ExpensesPage() {
       {/* Add / Edit expense modal */}
       <Modal open={showAdd} onClose={() => setShowAdd(false)} title={editingId ? 'Edit Expense' : 'Add Expense'}>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2"><label className="block text-xs text-text-muted mb-1">Title *</label><input className="input" value={form.title} onChange={e => setForm(p => ({...p, title: e.target.value}))} placeholder="Expense title" /></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="col-span-1 sm:col-span-2"><label className="block text-xs text-text-muted mb-1">Title *</label><input className="input" value={form.title} onChange={e => setForm(p => ({...p, title: e.target.value}))} placeholder="Expense title" /></div>
             <div>
               <label className="block text-xs text-text-muted mb-1">Category</label>
               {showNewCategory ? (
@@ -386,7 +393,7 @@ export function ExpensesPage() {
             </div>
             <div><label className="block text-xs text-text-muted mb-1">Date</label><input type="date" className="input" value={form.expense_date} onChange={e => setForm(p => ({...p, expense_date: e.target.value}))} /></div>
             <div><label className="block text-xs text-text-muted mb-1">Reference No.</label><input className="input" value={form.reference_no} onChange={e => setForm(p => ({...p, reference_no: e.target.value}))} placeholder="TXN-XXXXXX" /></div>
-            <div className="col-span-2"><label className="block text-xs text-text-muted mb-1">Notes</label><textarea className="input" rows={2} value={form.notes} onChange={e => setForm(p => ({...p, notes: e.target.value}))} /></div>
+            <div className="col-span-1 sm:col-span-2"><label className="block text-xs text-text-muted mb-1">Notes</label><textarea className="input" rows={2} value={form.notes} onChange={e => setForm(p => ({...p, notes: e.target.value}))} /></div>
           </div>
           <div className="flex gap-3 pt-2">
             <button onClick={() => setShowAdd(false)} className="btn-secondary flex-1">Cancel</button>
