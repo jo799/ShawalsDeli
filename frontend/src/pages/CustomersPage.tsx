@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, Search, Edit2, Trash2, Phone, Mail, MapPin, Star, ShoppingCart, Wallet, ShoppingBag } from 'lucide-react';
 import api from '@/lib/api';
+import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, formatDate, formatTime, getInitials } from '@/lib/utils';
 import { PageHeader, StatusBadge, Pagination, Modal, LoadingPage } from '@/components/ui';
 import toast from 'react-hot-toast';
@@ -86,7 +87,7 @@ export default function CustomersPage() {
   // Soft delete (status='inactive') — order history and the loyalty ledger
   // stay intact, the customer just stops showing up in the active list.
   const deleteCustomer = async (c: Customer) => {
-    if (!confirm(`Delete ${c.full_name}? Their order and points history will be kept, but they won't appear in the customer list anymore.`)) return;
+    if (!confirmDelete(`Delete ${c.full_name}? Their order and points history will be kept, but they won't appear in the customer list anymore.`)) return;
     try {
       await api.delete(`/customers/${c.id}`);
       toast.success('Customer deleted');
@@ -156,7 +157,7 @@ export default function CustomersPage() {
   const LEDGER_ICON: Record<string, string> = { earn: '⭐', redeem: '🎁', adjust: '⚙', expire: '⏳' };
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex flex-col md:flex-row h-full overflow-hidden">
       {/* Main list */}
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Customers" subtitle="View and manage customer information">
@@ -222,7 +223,7 @@ export default function CustomersPage() {
 
       {/* Customer Detail Panel */}
       {selected && (
-        <div className="w-[380px] shrink-0 border-l border-border bg-surface-card flex flex-col overflow-y-auto">
+        <div className="w-full md:w-[380px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col overflow-y-auto max-h-[60vh] md:max-h-none">
           {/* Back + actions */}
           <div className="p-4 border-b border-border flex items-center justify-between">
             <button onClick={() => setSelected(null)} className="btn-ghost text-xs flex items-center gap-1">

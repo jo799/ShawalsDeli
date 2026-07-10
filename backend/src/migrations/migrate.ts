@@ -419,6 +419,11 @@ const createTables = async () => {
         inventory_deducted BOOLEAN NOT NULL DEFAULT false,
         special_instructions TEXT,
         served_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        -- Client-generated key, used by the offline sync queue (and as a
+        -- side benefit, protects against an accidental double-submit from a
+        -- slow network response) — a repeat request with the same key
+        -- returns the order already created instead of making a second one.
+        client_reference_id VARCHAR(100) UNIQUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         completed_at TIMESTAMP
@@ -477,6 +482,7 @@ const createTables = async () => {
         -- receipt and the payments ledger showing exactly what was redeemed
         -- at the time, regardless of any rate change afterward.
         points_redeemed INTEGER,
+        client_reference_id VARCHAR(100) UNIQUE,
         processed_by UUID REFERENCES users(id) ON DELETE SET NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -589,6 +595,47 @@ const createTables = async () => {
       )
     `);
 
+    // Email login code (OTP 2FA) defaults to ON — this is a security
+    // mechanism that should actually be in effect rather than something
+    // that only works once someone happens to discover the toggle in
+    // Settings. ON CONFLICT DO NOTHING means this only sets the *initial*
+    // value: if this key already exists (someone already saved a choice,
+    // on or off), that choice is left exactly as it is.
+    await client.query(`
+      INSERT INTO settings (key, value) VALUES ('otp_login_enabled', 'true')
+      ON CONFLICT (key) DO NOTHING
+    `);
+
+    // =====================
+    // AUDIT LOGS
+    // =====================
+    // A dedicated, append-only trail for security-sensitive actions — found
+    // missing entirely during a security review. Before this, there was no
+    // way to answer "who approved this staff account", "who changed this
+    // menu price", "who processed this refund", or "who just tried to log
+    // in and failed five times". user_id is nullable and full_name/email
+    // are captured as plain text at the time of the event (not just a
+    // foreign key) specifically so the trail survives a user being deleted
+    // later — an audit log that goes blank the moment the account it's
+    // about is removed defeats much of its own purpose.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        user_name VARCHAR(150),
+        user_email VARCHAR(150),
+        action VARCHAR(100) NOT NULL,
+        entity_type VARCHAR(50),
+        entity_id VARCHAR(100),
+        details JSONB,
+        ip_address VARCHAR(64),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id)`);
+
     // =====================
     // PASSWORD RESETS
     // =====================
@@ -604,10 +651,31 @@ const createTables = async () => {
         token_hash VARCHAR(64) UNIQUE NOT NULL,
         expires_at TIMESTAMP NOT NULL,
         used_at TIMESTAMP,
+        attempts INTEGER NOT NULL DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id)`);
+
+    // =====================
+    // LOGIN OTPs (2FA)
+    // =====================
+    // Second factor after a correct email/password — the OTP itself is
+    // never stored in plain text, same reasoning as password_resets:
+    // a database read alone shouldn't be enough to complete a login.
+    // Short-lived (5 minutes, enforced in authController) and single-use.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS login_otps (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        otp_hash VARCHAR(64) NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        used_at TIMESTAMP,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_login_otps_user ON login_otps(user_id)`);
 
     // =====================
     // STAFF SCHEDULING
@@ -851,6 +919,23 @@ const createTables = async () => {
 
     await client.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS award_loyalty BOOLEAN NOT NULL DEFAULT true`);
     await client.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS points_redeemed INTEGER`);
+    await client.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS client_reference_id VARCHAR(100)`);
+    await client.query(`ALTER TABLE password_resets ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0`);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payments_client_reference_id_key') THEN
+          ALTER TABLE payments ADD CONSTRAINT payments_client_reference_id_key UNIQUE (client_reference_id);
+        END IF;
+      END $$;
+    `);
+    await client.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_reference_id VARCHAR(100)`);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'orders_client_reference_id_key') THEN
+          ALTER TABLE orders ADD CONSTRAINT orders_client_reference_id_key UNIQUE (client_reference_id);
+        END IF;
+      END $$;
+    `);
     // Existing installations already have the old CHECK constraint baked in
     // (changing the CREATE TABLE statement above only affects brand new
     // databases) — drop and recreate it with 'points' included.

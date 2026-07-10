@@ -9,6 +9,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
 import api from '@/lib/api';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { formatCurrency, formatTime, toLocalDateString } from '@/lib/utils';
 import { StatusBadge } from '@/components/ui';
 
@@ -44,6 +45,7 @@ interface RecentOrder {
 }
 
 export default function DashboardPage() {
+  const isOnline = useOnlineStatus();
   const [stats, setStats] = useState<DashStats>({ today_sales: 0, today_orders: 0, active_customers: 0, low_stock_items: 0, pending_orders: 0, avg_order_value: 0 });
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [salesData, setSalesData] = useState<Array<{hour: string; Sales: number; Orders: number}>>([]);
@@ -107,9 +109,9 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div className="p-6 overflow-y-auto h-full">
+    <div className="p-4 md:p-6 overflow-y-auto h-full">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-text-primary">Dashboard</h1>
           <p className="text-sm text-text-muted mt-0.5">
@@ -117,15 +119,15 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 text-xs text-status-success bg-status-success/10 px-3 py-1.5 rounded-full">
-            <span className="w-1.5 h-1.5 rounded-full bg-status-success animate-pulse" />
-            System Online
+          <div className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full ${isOnline ? 'text-status-success bg-status-success/10' : 'text-status-error bg-status-error/10'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-status-success animate-pulse' : 'bg-status-error'}`} />
+            {isOnline ? 'System Online' : 'Offline'}
           </div>
         </div>
       </div>
 
       {/* KPI Grid */}
-      <div className="grid grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
         {kpis.map(kpi => (
           <div key={kpi.label} className="card p-4">
             <div className={`w-10 h-10 rounded-xl ${kpi.iconBg} flex items-center justify-center mb-3`}>
@@ -144,9 +146,9 @@ export default function DashboardPage() {
       </div>
 
       {/* Charts row */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         {/* Sales Trend */}
-        <div className="card p-4 col-span-2">
+        <div className="card p-4 lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-text-primary">Sales Trend Today</h2>
             <select className="select text-xs py-1 w-24">
@@ -214,9 +216,9 @@ export default function DashboardPage() {
       </div>
 
       {/* Bottom row */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Recent Orders */}
-        <div className="card col-span-2">
+        <div className="card lg:col-span-2">
           <div className="flex items-center justify-between p-4 border-b border-border">
             <h2 className="font-semibold text-text-primary">Recent Orders</h2>
             <a href="/orders" className="text-xs text-brand hover:text-brand-400">View All →</a>

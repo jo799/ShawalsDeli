@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { login, register, forgotPassword, resetPassword, getProfile, changePassword } from '../controllers/authController';
+import { login, register, forgotPassword, verifyResetOtp, resetPassword, getProfile, changePassword, verifyLoginOtp, getSystemStatus, setupFirstAdmin } from '../controllers/authController';
 import { getOrders, getOrderById, createOrder, updateOrderStatus, processPayment, cancelPendingPayment, refundOrder, voidOrder, getOrderStats } from '../controllers/ordersController';
 import { getMenuItems, getCategories, createMenuItem, updateMenuItem, deleteMenuItem, getRecipe, setRecipe, getMenuItemByBarcode } from '../controllers/menuController';
 import { uploadMenuImage } from '../controllers/uploadController';
@@ -14,14 +14,19 @@ import { getPurchaseOrders, getPurchaseOrderById, createPurchaseOrder, receivePu
 import { initiateStkPush, queryStkStatus, mpesaCallback, reconcilePayment } from '../controllers/mpesaController';
 import { createHeldOrder, getHeldOrders, deleteHeldOrder } from '../controllers/heldOrdersController';
 import { getSettings, updateSettings, uploadLogo, getSystemInfo, getStorageUsage, createBackup, getBackups, downloadBackup, getRecentActivity } from '../controllers/settingsController';
+import { getAuditLogs, getAuditLogActions } from '../controllers/auditLogsController';
 import { authenticate, authorize } from '../middleware/auth';
 
 const router = Router();
 
 // Auth
+router.get('/auth/system-status', getSystemStatus);
+router.post('/auth/setup', setupFirstAdmin);
 router.post('/auth/login', login);
+router.post('/auth/verify-otp', verifyLoginOtp);
 router.post('/auth/register', register);
 router.post('/auth/forgot-password', forgotPassword);
+router.post('/auth/verify-reset-otp', verifyResetOtp);
 router.post('/auth/reset-password', resetPassword);
 router.get('/auth/profile', authenticate, getProfile);
 router.put('/auth/change-password', authenticate, changePassword);
@@ -82,9 +87,14 @@ router.get('/expenses', authenticate, getExpenses);
 router.get('/expenses/stats', authenticate, getExpenseStats);
 router.get('/expenses/categories', authenticate, getExpenseCategories);
 router.post('/expenses/categories', authenticate, authorize('administrator', 'manager'), createExpenseCategory);
-router.post('/expenses', authenticate, createExpense);
-router.put('/expenses/:id', authenticate, updateExpense);
-router.post('/expenses/:id/receipt', authenticate, uploadExpenseReceipt);
+// Expenses are financial records that affect real reporting — same
+// admin/manager restriction as deleting one already had, now applied
+// consistently to creating and editing them too. Previously any
+// authenticated staff member (a waiter, a cleaner) could create or modify
+// an expense record with no restriction at all.
+router.post('/expenses', authenticate, authorize('administrator', 'manager'), createExpense);
+router.put('/expenses/:id', authenticate, authorize('administrator', 'manager'), updateExpense);
+router.post('/expenses/:id/receipt', authenticate, authorize('administrator', 'manager'), uploadExpenseReceipt);
 router.delete('/expenses/:id', authenticate, authorize('administrator', 'manager'), deleteExpense);
 
 // Staff
@@ -155,5 +165,11 @@ router.get('/settings/recent-activity', authenticate, authorize('administrator',
 router.post('/settings/backup', authenticate, authorize('administrator'), createBackup);
 router.get('/settings/backups', authenticate, authorize('administrator'), getBackups);
 router.get('/settings/backups/:filename', authenticate, authorize('administrator'), downloadBackup);
+
+// Audit Logs — admin-only, same reasoning as backups: this is visibility
+// into everyone's actions across the whole system, not something a
+// manager-level view should include.
+router.get('/audit-logs', authenticate, authorize('administrator'), getAuditLogs);
+router.get('/audit-logs/actions', authenticate, authorize('administrator'), getAuditLogActions);
 
 export default router;

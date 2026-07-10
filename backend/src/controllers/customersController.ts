@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query, getClient } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
+import { logAudit } from '../services/auditLog';
 
 export const getCustomers = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -200,14 +201,15 @@ export const redeemPoints = async (req: AuthRequest, res: Response): Promise<voi
 // 'inactive' matches how the rest of this app treats things people want
 // gone from daily use without erasing the record — the same pattern menu
 // items, tables, and inventory items already use.
-export const deleteCustomer = async (req: Request, res: Response): Promise<void> => {
+export const deleteCustomer = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const result = await query(
-      `UPDATE customers SET status = 'inactive', updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING id`,
+      `UPDATE customers SET status = 'inactive', updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING id, full_name`,
       [id]
     );
     if (!result.rows.length) { res.status(404).json({ success: false, message: 'Customer not found' }); return; }
+    await logAudit(req, { action: 'customer_deleted', entityType: 'customer', entityId: id, details: { full_name: result.rows[0].full_name } });
     res.json({ success: true, message: 'Customer deleted' });
   } catch (error) {
     console.error(error);
@@ -263,6 +265,7 @@ export const adjustPoints = async (req: AuthRequest, res: Response): Promise<voi
     );
 
     await client.query('COMMIT');
+    await logAudit(req, { action: 'loyalty_points_adjusted', entityType: 'customer', entityId: id, details: { points: delta, reason: description.toString().trim() } });
     res.json({ success: true, message: `Adjusted by ${delta > 0 ? '+' : ''}${delta} points` });
   } catch (error) {
     await client.query('ROLLBACK');

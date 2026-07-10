@@ -6,6 +6,10 @@ import {
   Pause, Save, Banknote, Smartphone, CreditCard, Shuffle, User, Star
 } from 'lucide-react';
 import api from '@/lib/api';
+import { enqueueSale } from '@/lib/offlineSync/queue';
+import { saveCartDraft, loadCartDraft, clearCartDraft } from '@/lib/posCartPersistence';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, resolveMenuImage, menuImagePlaceholder } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import Receipt from '@/components/Receipt';
@@ -22,19 +26,23 @@ interface HeldOrder {
 
 type MpesaStatus = 'idle' | 'sending' | 'waiting' | 'completed' | 'failed' | 'cancelled';
 
-const PAYMENT_METHODS = ['Cash', 'M-Pesa', 'Card', 'Split Bill'];
 const ORDER_TYPES     = ['Dine In', 'Takeaway', 'Delivery'];
 
 export default function POSPage() {
   const navigate = useNavigate();
+  // Read once, synchronously, before any state initializes — this is what
+  // lets cart/orderType/table/customer come back pre-filled on the very
+  // first render after a refresh, rather than flashing empty and then
+  // populating a moment later.
+  const cartDraft = loadCartDraft();
   const [categories, setCategories] = useState<Category[]>([]);
   const [items,      setItems]      = useState<MenuItem[]>([]);
-  const [cart,       setCart]       = useState<CartItem[]>([]);
+  const [cart,       setCart]       = useState<CartItem[]>(() => cartDraft?.cart || []);
   const [activeCategory, setActiveCategory] = useState('All');
   const [search,         setSearch]         = useState('');
   const [tables,          setTables]          = useState<RestaurantTable[]>([]);
-  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
-  const [orderType,      setOrderType]      = useState('Dine In');
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(() => cartDraft?.selectedTableId ?? null);
+  const [orderType,      setOrderType]      = useState(() => cartDraft?.orderType || 'Dine In');
   const [loadingMenu,    setLoadingMenu]    = useState(false);
   const [paymentMethod,  setPaymentMethod]  = useState('Cash');
   const [processingPayment, setProcessingPayment] = useState(false);
@@ -51,7 +59,7 @@ export default function POSPage() {
   // that: a cashier can attach a customer for order history/records without
   // necessarily wanting to earn points on this particular sale (e.g. a
   // staff discount).
-  const [selectedCustomer, setSelectedCustomer] = useState<{ id: string; full_name: string; phone?: string; available_points?: number } | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<{ id: string; full_name: string; phone?: string; available_points?: number } | null>(() => cartDraft?.selectedCustomer ?? null);
   const [awardLoyalty, setAwardLoyalty] = useState(true);
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   // Scan — a real USB barcode scanner behaves as a keyboard: it "types" the
@@ -69,6 +77,12 @@ export default function POSPage() {
   const [customerResults, setCustomerResults] = useState<Array<{ id: string; full_name: string; phone?: string; available_points?: number }>>([]);
   const [searchingCustomers, setSearchingCustomers] = useState(false);
   const [pointValueKes, setPointValueKes] = useState(1);
+  // Which tender buttons actually show up at checkout, and which one is
+  // pre-selected — configured from Settings > POS & Payments rather than
+  // fixed in code. Cash is never excluded here even if somehow misconfigured,
+  // since it's the one method that always has to work.
+  const [posConfig, setPosConfig] = useState({ defaultMethod: 'Cash', enableMpesa: true, enableCard: true, enablePointsRedemption: true });
+  const isOnline = useOnlineStatus();
   const [pointsToRedeem, setPointsToRedeem] = useState('');
 
   // ── Multi-tender payment state ─────────────────────────────────────────
@@ -100,6 +114,14 @@ export default function POSPage() {
   /* Split bill */
   const [showSplitModal, setShowSplitModal] = useState(false);
   const [splitParts,     setSplitParts]     = useState(2);
+  // The split modal previously had no way to record HOW the money was
+  // actually collected — every split payment was tagged with the generic
+  // 'split' method regardless of whether it was cash or card, so there was
+  // no way to reconcile split-bill takings against the till or bank
+  // statement. M-Pesa isn't an option here since it needs the async
+  // STK-push flow (a phone number per person), which doesn't fit this
+  // single confirm-and-done action.
+  const [splitPaymentMethod, setSplitPaymentMethod] = useState<'cash' | 'card'>('cash');
 
   /* ── Load menu ─────────────────────────────────────────────────────── */
   useEffect(() => {
@@ -166,6 +188,25 @@ export default function POSPage() {
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
   useEffect(() => { api.get('/loyalty/stats').then(r => setPointValueKes(r.data.data.point_value_kes)).catch(() => {}); }, []);
+
+  // Persists the in-progress sale so a refresh or navigating away and back
+  // doesn't silently wipe out whatever was already rung up — this used to
+  // be pure component state with no recovery at all.
+  useEffect(() => {
+    saveCartDraft({ cart, orderType, selectedTableId, selectedCustomer });
+  }, [cart, orderType, selectedTableId, selectedCustomer]);
+  useEffect(() => {
+    api.get('/settings').then(r => {
+      const s = r.data.data;
+      setPosConfig({
+        defaultMethod: s.pos_default_payment_method || 'Cash',
+        enableMpesa: s.pos_enable_mpesa !== 'false',
+        enableCard: s.pos_enable_card !== 'false',
+        enablePointsRedemption: s.pos_enable_points_redemption !== 'false',
+      });
+      if (s.pos_default_payment_method) setPaymentMethod(s.pos_default_payment_method);
+    }).catch(() => {});
+  }, []);
 
   // Debounced customer search — only runs while the picker is actually open,
   // same 400ms pattern used for search boxes elsewhere in the app.
@@ -260,14 +301,28 @@ export default function POSPage() {
 
   // "Points" only ever shows up as a tender option once there's an actual
   // customer attached with something to spend — for a walk-in sale it
-  // wouldn't mean anything.
-  const availableMethods = (selectedCustomer?.available_points || 0) > 0 ? [...PAYMENT_METHODS, 'Points'] : PAYMENT_METHODS;
+  // wouldn't mean anything. M-Pesa and Card can each be turned off
+  // entirely from Settings > POS & Payments (e.g. a business that hasn't
+  // set up card payments yet); Cash always stays available regardless.
+  //
+  // While offline, M-Pesa, Split Bill, and Points all drop out regardless
+  // of those settings — none of them can work without a live server. M-Pesa
+  // needs an actual call to Safaricom (there's no way to queue that), and
+  // Split Bill / Points both need a live, current balance to check against
+  // rather than a possibly-stale local number.
+  const availableMethods = [
+    'Cash',
+    ...(posConfig.enableMpesa && isOnline ? ['M-Pesa'] : []),
+    ...(posConfig.enableCard ? ['Card'] : []),
+    ...(isOnline ? ['Split Bill'] : []),
+    ...(posConfig.enablePointsRedemption && isOnline && (selectedCustomer?.available_points || 0) > 0 ? ['Points'] : []),
+  ];
   const maxPointsUsable = Math.min(
     selectedCustomer?.available_points || 0,
     pointValueKes > 0 ? Math.floor(balanceDueDisplay / pointValueKes) : 0
   );
   useEffect(() => {
-    if (paymentMethod === 'Points' && !availableMethods.includes('Points')) setPaymentMethod('Cash');
+    if (!availableMethods.includes(paymentMethod)) setPaymentMethod('Cash');
   }, [paymentMethod, availableMethods]);
 
   /* ── Create order ──────────────────────────────────────────────────── */
@@ -358,6 +413,8 @@ export default function POSPage() {
       setSelectedCustomer(null);
       setAwardLoyalty(true);
       setPointsToRedeem('');
+      setSplitPaymentMethod('cash');
+      clearCartDraft();
     } else {
       setActiveOrder(prev => prev ? { ...prev, amount_paid: prev.total - balanceRemaining } : prev);
       setTenderAmount(String(balanceRemaining));
@@ -387,6 +444,48 @@ export default function POSPage() {
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Checkout failed';
       toast.error(msg);
+    } finally { setProcessingPayment(false); }
+  };
+
+  /* ── Offline checkout — a deliberately separate, simpler path ──────────
+     Online checkout supports partial tenders, switching methods mid-sale,
+     and building on an order that already exists. None of that is safe to
+     replicate against a local queue with no live server to check balances
+     against, so offline mode only ever does ONE thing: ring up the whole
+     cart as a single, full Cash or Card payment, queue it, and finish the
+     sale immediately from the cashier's point of view — the sync happening
+     later is a background concern, not something the till should wait on. */
+  const payCashOrCardOffline = async (method: 'cash' | 'card') => {
+    if (!cart.length) { toast.error('Cart is empty'); return; }
+    if (activeOrder) {
+      toast.error('This order already has a partial payment recorded online — reconnect to finish it rather than starting a new one offline.');
+      return;
+    }
+    if (!requireTableIfDineIn()) return;
+    if (processingPayment) return;
+    setProcessingPayment(true);
+    try {
+      await enqueueSale(
+        {
+          type: orderType === 'Dine In' ? 'dine_in' : orderType === 'Takeaway' ? 'takeaway' : 'delivery',
+          table_id: orderType === 'Dine In' ? selectedTableId || undefined : undefined,
+          customer_id: selectedCustomer?.id,
+          customer_name: selectedCustomer?.full_name || 'Walk-in Customer',
+          guests: 1,
+          items: cart.map(c => ({ menu_item_id: c.id, item_name: c.name, quantity: c.quantity, unit_price: c.price })),
+          payment_method: method,
+        },
+        { payment_method: method, amount: total, award_loyalty: awardLoyalty }
+      );
+      toast.success(`Sale queued (${formatCurrency(total)}) — will sync automatically once back online`, { icon: '📥', duration: 5000 });
+      setCart([]);
+      setActiveOrder(null);
+      setTenderAmount('');
+      setSelectedCustomer(null);
+      setAwardLoyalty(true);
+      clearCartDraft();
+    } catch {
+      toast.error('Failed to queue this sale locally — please try again');
     } finally { setProcessingPayment(false); }
   };
 
@@ -451,7 +550,10 @@ export default function POSPage() {
       // confirmed it) — if we simply can't reach our own API to check the
       // exact remaining balance, don't leave the cashier stuck mid-modal.
       toast.success('M-Pesa payment confirmed!');
-      setTimeout(() => { setShowMpesaModal(false); setCart([]); setActiveOrder(null); setTenderAmount(''); }, 1500);
+      setTimeout(() => {
+        setShowMpesaModal(false); setCart([]); setActiveOrder(null); setTenderAmount('');
+        setSelectedCustomer(null); clearCartDraft();
+      }, 1500);
     }
   };
 
@@ -588,7 +690,7 @@ export default function POSPage() {
   };
 
   const discardHeld = async (id: string) => {
-    if (!confirm('Discard this held order? This cannot be undone.')) return;
+    if (!confirmDelete('Discard this held order? This cannot be undone.')) return;
     try {
       await api.delete(`/held-orders/${id}`);
       fetchHeldOrders();
@@ -605,33 +707,36 @@ export default function POSPage() {
     if (paymentMethod === 'M-Pesa')    openMpesaModal();
     else if (paymentMethod === 'Split Bill') setShowSplitModal(true);
     else if (paymentMethod === 'Points') payWithPoints();
+    else if (!isOnline) payCashOrCardOffline(paymentMethod.toLowerCase() as 'cash' | 'card');
     else payCashOrCard(paymentMethod.toLowerCase() as 'cash' | 'card');
   };
 
   /* ─────────────────────────────────────────────────────────────────── */
   return (
     <div
-      className="flex h-screen overflow-hidden"
+      className="flex flex-col md:flex-row h-screen overflow-hidden"
       onClick={() => { setShowTablePicker(false); setShowTypePicker(false); setShowHeldPanel(false); }}
     >
 
       {/* ══════════════ LEFT — Menu ══════════════ */}
-      <div className="flex-1 flex flex-col overflow-hidden p-4 gap-3">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden p-4 gap-3">
 
         {/* Top bar */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-status-success animate-pulse" />
+            <span className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-status-success animate-pulse' : 'bg-status-error'}`} />
             <h1 className="font-bold text-xl text-text-primary tracking-tight">POS</h1>
-            <span className="text-sm text-status-success font-medium">● Online</span>
+            <span className={`text-sm font-medium ${isOnline ? 'text-status-success' : 'text-status-error'}`}>
+              {isOnline ? '● Online' : '● Offline'}
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowScanModal(true)} className="btn-secondary flex items-center gap-1.5 text-sm py-2">
-              <Scan size={15} /> Scan
+            <button onClick={() => setShowScanModal(true)} className="btn-secondary flex items-center gap-1.5 text-sm py-2" title="Scan">
+              <Scan size={15} /> <span className="hidden sm:inline">Scan</span>
             </button>
-            <button onClick={() => navigate('/orders')} className="btn-secondary flex items-center gap-1.5 text-sm py-2 relative">
-              <ShoppingCart size={15} /> Orders
+            <button onClick={() => navigate('/orders')} className="btn-secondary flex items-center gap-1.5 text-sm py-2 relative" title="Orders">
+              <ShoppingCart size={15} /> <span className="hidden sm:inline">Orders</span>
               {/* Live count of today's orders still in flight (new/preparing/
                   ready) — replaces what used to be a hardcoded "3". Hidden
                   entirely at zero so an idle POS doesn't show a stray badge. */}
@@ -647,8 +752,9 @@ export default function POSPage() {
               <button
                 onClick={() => { setShowHeldPanel(p => !p); setShowTablePicker(false); setShowTypePicker(false); }}
                 className="btn-secondary flex items-center gap-1.5 text-sm py-2 relative"
+                title="Held orders"
               >
-                <Pause size={14} /> Held
+                <Pause size={14} /> <span className="hidden sm:inline">Held</span>
                 {heldOrders.length > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-status-warning rounded-full text-[10px] font-bold flex items-center justify-center text-black">
                     {heldOrders.length > 99 ? '99+' : heldOrders.length}
@@ -813,37 +919,38 @@ export default function POSPage() {
 
         {/* Bottom actions */}
         <div className="flex items-center gap-2 pt-3 border-t border-border">
-          <button onClick={() => holdCurrentOrder()} className="btn-secondary flex-1 py-2.5 text-sm flex items-center justify-center gap-2">
-            <Pause size={14} /> Hold Order
+          <button onClick={() => holdCurrentOrder()} className="btn-secondary flex-1 py-2.5 text-sm flex items-center justify-center gap-2" title="Hold Order">
+            <Pause size={14} /> <span className="hidden lg:inline">Hold Order</span>
           </button>
-          <button onClick={saveDraft} className="btn-secondary flex-1 py-2.5 text-sm flex items-center justify-center gap-2">
-            <Save size={14} /> Save Draft
+          <button onClick={saveDraft} className="btn-secondary flex-1 py-2.5 text-sm flex items-center justify-center gap-2" title="Save Draft">
+            <Save size={14} /> <span className="hidden lg:inline">Save Draft</span>
           </button>
           <button
             onClick={() => setCart([])}
             className="btn-secondary flex-1 py-2.5 text-sm flex items-center justify-center gap-2 text-status-error border-status-error/20 hover:bg-status-error/5"
+            title="Clear Cart"
           >
-            <Trash2 size={14} /> Clear Cart
+            <Trash2 size={14} /> <span className="hidden lg:inline">Clear Cart</span>
           </button>
-          <button className="btn-secondary py-2.5 px-4 text-sm flex items-center gap-2">
-            <ShoppingCart size={14} /> Items ({itemCount})
+          <button className="btn-secondary py-2.5 px-4 text-sm flex items-center gap-2" title="Items">
+            <ShoppingCart size={14} /> <span className="hidden sm:inline">Items</span> ({itemCount})
           </button>
         </div>
       </div>
 
       {/* ══════════════ RIGHT — Cart ══════════════ */}
-      <div className="w-[340px] shrink-0 border-l border-border bg-surface-card flex flex-col">
+      <div className="w-full md:w-[340px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col max-h-[50vh] md:max-h-none">
 
         {/* Table header */}
-        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ShoppingCart size={17} className="text-brand" />
-            <span className="font-bold text-base">
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <ShoppingCart size={17} className="text-brand shrink-0" />
+            <span className="font-bold text-base truncate">
               {orderType === 'Dine In' ? (selectedTable ? `Table ${selectedTable.table_number}` : 'Dine In — no table selected') : orderType}
             </span>
           </div>
           {orderType === 'Dine In' && (
-            <button onClick={() => setShowTablePicker(true)} className="text-sm text-brand font-medium hover:text-brand-400">
+            <button onClick={() => setShowTablePicker(true)} className="text-sm text-brand font-medium hover:text-brand-400 shrink-0">
               {selectedTable ? 'Change' : 'Select table'}
             </button>
           )}
@@ -856,16 +963,16 @@ export default function POSPage() {
             disabled={!!activeOrder}
             className="w-full flex items-center justify-between gap-2 bg-surface-50 hover:bg-surface-100 rounded-xl px-3 py-2.5 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <span className="flex items-center gap-2 text-text-secondary">
-              <User size={14} />
+            <span className="flex items-center gap-2 text-text-secondary min-w-0">
+              <User size={14} className="shrink-0" />
               {selectedCustomer ? (
-                <span className="text-text-primary font-medium">{selectedCustomer.full_name}{selectedCustomer.phone ? ` · ${selectedCustomer.phone}` : ''}</span>
+                <span className="text-text-primary font-medium truncate">{selectedCustomer.full_name}{selectedCustomer.phone ? ` · ${selectedCustomer.phone}` : ''}</span>
               ) : 'Walk-in Customer'}
             </span>
             {selectedCustomer ? (
-              <span onClick={e => { e.stopPropagation(); setSelectedCustomer(null); }} className="text-text-muted hover:text-status-error p-1"><X size={13} /></span>
+              <span onClick={e => { e.stopPropagation(); setSelectedCustomer(null); }} className="text-text-muted hover:text-status-error p-1 shrink-0"><X size={13} /></span>
             ) : (
-              <span className="text-brand text-xs font-medium">Attach customer</span>
+              <span className="text-brand text-xs font-medium shrink-0">Attach customer</span>
             )}
           </button>
           {selectedCustomer && (
@@ -1012,7 +1119,7 @@ export default function POSPage() {
           )}
 
           {/* Payment method buttons */}
-          <div className={`grid gap-2 mt-1 ${availableMethods.length === 5 ? 'grid-cols-5' : 'grid-cols-4'}`}>
+          <div className={`grid gap-2 mt-1 ${availableMethods.length <= 2 ? 'grid-cols-2' : availableMethods.length === 3 ? 'grid-cols-3' : availableMethods.length >= 5 ? 'grid-cols-5' : 'grid-cols-4'}`}>
             {availableMethods.map(m => (
               <button
                 key={m}
@@ -1040,13 +1147,13 @@ export default function POSPage() {
             {processingPayment
               ? <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
               : <ShoppingCart size={17} />}
-            {processingPayment ? 'Processing...' : activeOrder ? `Charge ${formatCurrency(tenderAmount ? Number(tenderAmount) : Math.max(0, activeOrder.total - activeOrder.amount_paid))}` : 'Checkout   F2'}
+            {processingPayment ? 'Processing...' : activeOrder ? `Charge ${formatCurrency(tenderAmount ? Number(tenderAmount) : Math.max(0, activeOrder.total - activeOrder.amount_paid))}` : !isOnline ? 'Complete Sale (Offline)   F2' : 'Checkout   F2'}
           </button>
 
           {activeOrder && (
             <button
               onClick={async () => {
-                if (!confirm('Cancel this order entirely? Any payment already collected will need to be refunded manually from the Orders page.')) return;
+                if (!confirmDelete('Cancel this order entirely? Any payment already collected will need to be refunded manually from the Orders page.')) return;
                 try {
                   await api.put(`/orders/${activeOrder.id}/status`, { status: 'cancelled' });
                   toast('Order cancelled', { icon: 'ℹ️' });
@@ -1054,6 +1161,7 @@ export default function POSPage() {
                   toast.error('Could not cancel automatically — cancel it from the Orders page.');
                 }
                 setActiveOrder(null); setCart([]); setTenderAmount('');
+                setSelectedCustomer(null); setSelectedTableId(null); clearCartDraft();
               }}
               className="w-full text-center text-xs text-status-error hover:underline pt-1"
             >
@@ -1320,6 +1428,24 @@ export default function POSPage() {
               <p className="text-xs text-text-muted mt-1">Rounded up — restaurant absorbs the rounding difference</p>
             </div>
 
+            <div className="mb-5">
+              <p className="text-sm text-text-muted text-center mb-2">Collected as</p>
+              <div className="grid grid-cols-2 gap-2">
+                {(['cash', 'card'] as const).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setSplitPaymentMethod(m)}
+                    className={`py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors ${
+                      splitPaymentMethod === m ? 'bg-brand text-black' : 'bg-surface-50 text-text-secondary border border-border hover:text-text-primary'
+                    }`}
+                  >
+                    {m === 'cash' ? <Banknote size={15} /> : <CreditCard size={15} />}
+                    {m === 'cash' ? 'Cash' : 'Card'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="flex gap-3">
               <button onClick={() => setShowSplitModal(false)} className="btn-secondary flex-1 py-3">Cancel</button>
               <button
@@ -1336,12 +1462,12 @@ export default function POSPage() {
                     // check. The per-person figure above is customer-facing
                     // display math only; what we charge is the real bill.
                     const res = await api.post(`/orders/${order.id}/payment`, {
-                      payment_method: 'split',
+                      payment_method: splitPaymentMethod,
                       amount: order.total,
                       split_details: { parts: splitParts, per_person: Math.ceil(order.total / splitParts) },
                       award_loyalty: awardLoyalty,
                     });
-                    toast.success(`Split ${splitParts} ways — ${formatCurrency(Math.ceil(order.total / splitParts))} each`);
+                    toast.success(`Split ${splitParts} ways (${splitPaymentMethod}) — ${formatCurrency(Math.ceil(order.total / splitParts))} each`);
                     if (res.data.points_awarded > 0) toast.success(`+${res.data.points_awarded} loyalty points earned`, { icon: '⭐' });
                     settleAfterPayment(order, res.data.balance_remaining);
                   } catch (e: unknown) {

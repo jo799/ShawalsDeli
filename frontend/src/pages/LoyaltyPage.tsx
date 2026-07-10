@@ -122,7 +122,7 @@ export default function LoyaltyPointsPage() {
   };
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex flex-col md:flex-row h-full overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Loyalty Points" subtitle="Manage customer loyalty points — points convert directly to a KES value, redeemable like cash">
           <button onClick={refreshAll} className="btn-secondary flex items-center gap-1.5 text-sm"><RefreshCw size={13} /> Refresh</button>
@@ -132,7 +132,7 @@ export default function LoyaltyPointsPage() {
             hardcoded "125,840 pts earned this month" and "Points Liability"
             computed as total customers × 1934 — a formula with no actual
             relationship to anything. */}
-        <div className="grid grid-cols-5 gap-3 mb-5">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
           {[
             { label: 'Total Members', value: stats.total_members, icon: '⭐', sub: 'Active loyalty members' },
             { label: 'Total Points Earned', value: `${stats.total_earned.toLocaleString()} pts`, icon: '💰', sub: 'All-time' },
@@ -230,7 +230,7 @@ export default function LoyaltyPointsPage() {
       </div>
 
       {/* Right sidebar */}
-      <div className="w-[260px] shrink-0 border-l border-border bg-surface-card flex flex-col overflow-y-auto p-4 space-y-5">
+      <div className="w-full md:w-[260px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col overflow-y-auto p-4 space-y-5 max-h-[60vh] md:max-h-none">
         {/* Loyalty Tiers — pulled from the real loyalty_tiers table now.
             (The discount % benefits listed are informational only — order
             pricing doesn't apply any automatic discount, tier or otherwise.) */}

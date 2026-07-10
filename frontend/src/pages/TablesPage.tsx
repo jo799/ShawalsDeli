@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, RefreshCw, LayoutGrid, List } from 'lucide-react';
 import api from '@/lib/api';
+import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency } from '@/lib/utils';
 import { PageHeader, StatusBadge, Modal } from '@/components/ui';
 import toast from 'react-hot-toast';
@@ -119,7 +120,7 @@ export default function TablesPage() {
   // if the linked order is still open so this can't be used to silently
   // make an unpaid balance disappear from view.
   const closeTable = async (table: Table) => {
-    if (!confirm(`Clear Table ${table.table_number}? This marks it available for the next guest without changing its order.`)) return;
+    if (!confirmDelete(`Clear Table ${table.table_number}? This marks it available for the next guest without changing its order.`)) return;
     try {
       const res = await api.put(`/tables/${table.id}/status`, { status: 'available' });
       if (res.data.warning) {
@@ -168,7 +169,7 @@ export default function TablesPage() {
   };
 
   const deleteTable = async (table: Table) => {
-    if (!confirm(`Remove Table ${table.table_number} from the floor plan? This can't be undone from here.`)) return;
+    if (!confirmDelete(`Remove Table ${table.table_number} from the floor plan? This can't be undone from here.`)) return;
     try {
       await api.delete(`/tables/${table.id}`);
       toast.success(`Table ${table.table_number} removed`);
@@ -251,7 +252,7 @@ export default function TablesPage() {
   };
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex flex-col md:flex-row h-full overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Tables" subtitle="View and manage all restaurant tables">
           <button className="btn-secondary flex items-center gap-2 text-sm">
@@ -266,7 +267,7 @@ export default function TablesPage() {
         </PageHeader>
 
         {/* Stats */}
-        <div className="grid grid-cols-5 gap-3 mb-5">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
           {[
             { label: 'Total Tables', value: stats.total, icon: '🪑', color: 'text-text-primary' },
             { label: 'Occupied', value: stats.occupied, icon: '🔴', color: 'text-status-error' },
@@ -313,7 +314,7 @@ export default function TablesPage() {
             {areas.map(area => (
               <div key={area}>
                 <h3 className="text-sm font-semibold text-brand mb-3">{area}</h3>
-                <div className="grid grid-cols-6 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                   {tables.filter(t => t.area === area).map(table => (
                     <TableCard key={table.id} table={table} selected={selected?.id === table.id} onClick={() => setSelected(table)} />
                   ))}
@@ -360,8 +361,8 @@ export default function TablesPage() {
                 {showAllUpcoming ? '← Today only' : 'View All →'}
               </button>
             </div>
-            <div className="card overflow-hidden">
-              <table className="w-full">
+            <div className="card overflow-x-auto">
+              <table className="w-full min-w-[700px]">
                 <thead className="bg-surface-50">
                   <tr>{['Time','Table','Customer','Guests','Status','Notes','Actions'].map(h => (
                     <th key={h} className="table-header px-4 py-2 text-left">{h}</th>
@@ -409,7 +410,7 @@ export default function TablesPage() {
 
       {/* Selected table detail */}
       {selected && (
-        <div className="w-[300px] shrink-0 border-l border-border bg-surface-card flex flex-col">
+        <div className="w-full md:w-[300px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col max-h-[60vh] md:max-h-none">
           <div className="p-4 border-b border-border flex items-center justify-between">
             <h2 className="section-title">Selected Table</h2>
             <div className="flex items-center gap-1">

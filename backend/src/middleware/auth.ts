@@ -20,8 +20,12 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
     }
 
     const token = authHeader.substring(7);
-    const secret = process.env.JWT_SECRET || 'fallback_secret';
-    const decoded = jwt.verify(token, secret) as { id: string; email: string; role: string };
+    // No fallback here on purpose — server.ts refuses to boot at all unless
+    // JWT_SECRET is set and at least 32 characters, so this always reads a
+    // real secret. A hardcoded fallback string is a known value sitting in
+    // source control; anyone who read it could forge a valid token for any
+    // user, administrator included.
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { id: string; email: string; role: string };
 
     const result = await query('SELECT id, email, role, full_name, status FROM users WHERE id = $1', [decoded.id]);
     if (result.rows.length === 0 || result.rows[0].status === 'inactive') {

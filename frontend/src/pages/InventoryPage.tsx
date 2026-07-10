@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, Search, Filter, Edit2, ArrowLeftRight, Trash2, X, RefreshCw, Wheat, Beef, Droplet, Carrot, Flame, Cookie, Milk, Package, ShoppingCart, XCircle, Shuffle, Settings2, Wallet, AlertTriangle } from 'lucide-react';
 import api from '@/lib/api';
+import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { PageHeader, Pagination, Modal, LoadingPage } from '@/components/ui';
 import { useAuthStore } from '@/store/authStore';
@@ -183,7 +184,7 @@ export default function InventoryPage() {
   };
 
   const deleteItem = async (item: InventoryItem) => {
-    if (!confirm(`Remove "${item.name}" from inventory? This can't be undone from here.`)) return;
+    if (!confirmDelete(`Remove "${item.name}" from inventory? This can't be undone from here.`)) return;
     try {
       await api.delete(`/inventory/${item.id}`);
       toast.success(`${item.name} removed`);
@@ -196,7 +197,7 @@ export default function InventoryPage() {
   };
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex flex-col md:flex-row h-full overflow-hidden">
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Inventory" subtitle="Track and manage your stock items in real-time">
@@ -216,7 +217,7 @@ export default function InventoryPage() {
         </PageHeader>
 
         {/* Stats */}
-        <div className="grid grid-cols-4 gap-4 mb-5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
           {[
             { label: 'Total Items', value: stats.total_items, Icon: Package, sub: 'All inventory items', color: 'text-text-primary' },
             { label: 'Total Stock Value', value: formatCurrency(stats.total_value || 0), Icon: Wallet, sub: 'Current inventory value', color: 'text-brand' },
@@ -321,7 +322,7 @@ export default function InventoryPage() {
 
       {/* Right detail panel */}
       {selected && (
-        <div className="w-[280px] shrink-0 border-l border-border bg-surface-card flex flex-col overflow-y-auto">
+        <div className="w-full md:w-[280px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col overflow-y-auto max-h-[60vh] md:max-h-none">
           <div className="p-4 border-b border-border flex items-center justify-between">
             <h2 className="section-title text-sm">Item Details</h2>
             <button onClick={() => setSelected(null)}><X size={14} className="text-text-muted" /></button>

@@ -222,7 +222,7 @@ export default function SchedulingPage() {
   };
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex flex-col md:flex-row h-full overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Scheduling" subtitle="Create and manage staff schedules and shifts">
           <button onClick={exportCsv} className="btn-secondary flex items-center gap-1.5 text-sm">Export CSV</button>
@@ -233,7 +233,7 @@ export default function SchedulingPage() {
         </PageHeader>
 
         {/* Stats — every number here is real */}
-        <div className="grid grid-cols-3 gap-3 mb-5">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
           {[
             { label: 'Total Shifts', value: String(totalShifts), sub: 'This week', color: 'text-text-primary' },
             { label: 'Total Scheduled Hours', value: `${Math.round(totalHours)}h`, sub: 'This week', color: 'text-status-info' },
@@ -351,7 +351,7 @@ export default function SchedulingPage() {
       </div>
 
       {/* Right sidebar */}
-      <div className="w-[220px] shrink-0 border-l border-border bg-surface-card flex flex-col overflow-y-auto p-4 space-y-5">
+      <div className="w-full md:w-[220px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col overflow-y-auto p-4 space-y-5 max-h-[60vh] md:max-h-none">
         {/* Mini calendar */}
         <div>
           <div className="flex items-center justify-between mb-2">

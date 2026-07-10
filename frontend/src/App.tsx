@@ -6,7 +6,6 @@ import AppLayout from '@/components/layout/AppLayout';
 import LoginPage from '@/pages/LoginPage';
 import SignupPage from '@/pages/SignupPage';
 import ForgotPasswordPage from '@/pages/ForgotPasswordPage';
-import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import DashboardPage from '@/pages/DashboardPage';
 import POSPage from '@/pages/POSPage';
 import OrdersPage from '@/pages/OrdersPage';
@@ -39,7 +38,7 @@ export default function App() {
         <Toaster
           position="top-right"
           toastOptions={{
-            style: { background: '#1E1E1E', color: '#F5F5F5', border: '1px solid #2A2A2A' },
+            style: { background: 'rgb(var(--color-surface-card))', color: 'rgb(var(--color-text-primary))', border: '1px solid rgb(var(--color-border))' },
             success: { iconTheme: { primary: '#10B981', secondary: '#1E1E1E' } },
             error: { iconTheme: { primary: '#EF4444', secondary: '#1E1E1E' } },
           }}
@@ -48,7 +47,6 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
             <Route index element={<DashboardPage />} />
             <Route path="pos" element={<POSPage />} />

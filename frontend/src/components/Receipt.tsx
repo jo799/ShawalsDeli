@@ -118,16 +118,24 @@ export default function Receipt({ order }: { order: Record<string, unknown> | nu
             <div style={{ fontWeight: 700 }}>PAYMENT</div>
             {(order.payments as Array<Record<string, unknown>> | undefined)
               ?.filter(p => p.status === 'completed')
-              .map((p, idx) => (
-                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>
-                    {p.payment_method === 'points'
-                      ? `POINTS REDEEMED (${p.points_redeemed} pts)`
-                      : `${String(p.payment_method).toUpperCase()}${p.reference ? ` (${String(p.reference).slice(-6)})` : ''}`}
-                  </span>
-                  <span>{formatCurrency(Number(p.amount))}</span>
-                </div>
-              ))}
+              .map((p, idx) => {
+                const split = p.split_details as { parts?: number; per_person?: number } | null;
+                return (
+                  <div key={idx}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>
+                        {p.payment_method === 'points'
+                          ? `POINTS REDEEMED (${p.points_redeemed} pts)`
+                          : `${String(p.payment_method).toUpperCase()}${p.reference ? ` (${String(p.reference).slice(-6)})` : ''}`}
+                      </span>
+                      <span>{formatCurrency(Number(p.amount))}</span>
+                    </div>
+                    {split?.parts && (
+                      <div style={{ fontSize: 11, opacity: 0.75 }}>Split {split.parts} ways — {formatCurrency(split.per_person || 0)} each</div>
+                    )}
+                  </div>
+                );
+              })}
             <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, marginTop: 2 }}>
               <span>Total paid</span><span>{formatCurrency(Number(order.amount_paid ?? 0))}</span>
             </div>

@@ -1310,7 +1310,7 @@ ad479767-6b4b-4c63-91ae-52aad140c2b0	Mary Njeri	mary.njeri@shawalsdei.com	0701 2
 bff46365-515d-4692-b02b-0d04f17d9bb4	Grace Mutua	grace.mutua@shawalsdei.com	0720 333 222	$2a$12$R/zeQZDGiuaZQywmj6KAK.GXwGf0oKvNB2IE4RQGGhDKMhhSBHFQa	cleaner	on_leave	part_time	\N	2023-08-15	\N	2026-07-02 14:43:47.302039	2026-07-02 14:43:47.302039	approved
 69ff3756-a7ef-4849-a2f2-1f4127ba740d	joseph Kimunya	jmkimunya95@gmail.com	\N	$2a$12$.PMmnL/HmftZ4nVHWJVhpeFJvKui8axYQ0npCnk.cmA8LBrl4uU6O	waiter	active	full_time	\N	2026-07-04	\N	2026-07-04 17:26:39.688619	2026-07-04 17:26:39.688619	pending
 b6d9b46c-bcdd-4a5b-ae4c-d53dc07bc488	Joseph Kimunya	kimunyajoseph77@gmail.com		$2a$12$ZtvgBtwlmFmyw0GfwXZHa.tHo1MU8sg94AN7QmxnNAbp7lwB2X6su	waiter	active	full_time	\N	2026-07-04	2026-07-05 01:13:04.17778	2026-07-04 11:42:58.409427	2026-07-04 11:42:58.409427	approved
-531990e6-3e3b-4281-a19a-93e46319d7b9	Joseph Kimunya	joseph.kimunya@shawalsdei.com	0712 345 678	$2a$12$R/zeQZDGiuaZQywmj6KAK.GXwGf0oKvNB2IE4RQGGhDKMhhSBHFQa	administrator	active	full_time	\N	2023-01-10	2026-07-05 01:14:23.81534	2026-07-02 14:43:47.302039	2026-07-02 14:43:47.302039	approved
+531990e6-3e3b-4281-a19a-93e46319d7b9	Joseph Kimunya	kimunyajoseph77@gmail.com	0741616119	$2a$12$R/zeQZDGiuaZQywmj6KAK.GXwGf0oKvNB2IE4RQGGhDKMhhSBHFQa	administrator	active	full_time	\N	2023-01-10	2026-07-05 01:14:23.81534	2026-07-02 14:43:47.302039	2026-07-02 14:43:47.302039	approved
 \.
 
 

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query, getClient } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
+import { logAudit } from '../services/auditLog';
 
 export const getTables = async (_req: Request, res: Response): Promise<void> => {
   try {
@@ -131,6 +132,7 @@ export const deleteTable = async (req: AuthRequest, res: Response): Promise<void
       `UPDATE restaurant_tables SET is_active = false, current_order_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
       [id]
     );
+    await logAudit(req, { action: 'table_deleted', entityType: 'table', entityId: id });
     res.json({ success: true, message: 'Table removed' });
   } catch (error) {
     console.error(error);

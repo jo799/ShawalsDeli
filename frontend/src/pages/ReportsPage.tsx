@@ -3,6 +3,7 @@ import { RefreshCw, Download, Printer } from 'lucide-react';
 import { AreaChart, Area, PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format } from 'date-fns';
 import api from '@/lib/api';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { formatCurrency, toLocalDateString, resolveMenuImage } from '@/lib/utils';
 import { LoadingPage } from '@/components/ui';
 import toast from 'react-hot-toast';
@@ -43,6 +44,7 @@ const TrendBadge = ({ pct }: { pct: number | null }) => {
 };
 
 export default function ReportsPage() {
+  const isOnline = useOnlineStatus();
   const [tab, setTab] = useState<'Daily' | 'Weekly' | 'Monthly'>('Daily');
   const [date, setDate] = useState(toLocalDateString());
   const [data, setData] = useState<ReportData | null>(null);
@@ -121,13 +123,13 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="p-6 overflow-y-auto h-full">
+    <div className="p-4 md:p-6 overflow-y-auto h-full">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-status-success" />
+          <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-status-success' : 'bg-status-error'}`} />
           <h1 className="text-xl font-bold text-text-primary">Reports</h1>
-          <span className="text-xs text-status-success">● Online</span>
+          <span className={`text-xs ${isOnline ? 'text-status-success' : 'text-status-error'}`}>{isOnline ? '● Online' : '● Offline'}</span>
         </div>
         <div className="flex items-center gap-2">
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input text-xs py-1.5 w-42" />
@@ -153,7 +155,7 @@ export default function ReportsPage() {
               equivalent previous period (yesterday / last week / last
               month), not the fixed "+18%" style figures every card used to
               show regardless of what actually happened. */}
-          <div className="grid grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             {[
               { label: 'Total Sales', value: formatCurrency(data.summary.total_sales), icon: '💰', pct: data.comparison.total_sales_change_pct },
               { label: 'Orders', value: data.summary.total_orders, icon: '📋', pct: data.comparison.total_orders_change_pct },
@@ -172,8 +174,8 @@ export default function ReportsPage() {
           </div>
 
           {/* Charts row 1 */}
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <div className="card p-4 col-span-2">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+            <div className="card p-4 lg:col-span-2">
               <h3 className="section-title text-sm mb-3">Sales Trend ({periodLabel})</h3>
               <ResponsiveContainer width="100%" height={200}>
                 <AreaChart data={trendData}>
@@ -233,7 +235,7 @@ export default function ReportsPage() {
           </div>
 
           {/* Charts row 2 */}
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
             <div className="card p-4">
               <h3 className="section-title text-sm mb-3">Payment Methods ({periodLabel})</h3>
               <ResponsiveContainer width="100%" height={120}>
@@ -310,7 +312,8 @@ export default function ReportsPage() {
               unnecessary network dependency and often just wrong. */}
           <div className="card p-4">
             <h3 className="section-title text-sm mb-3">Top Selling Items ({periodLabel})</h3>
-            <table className="w-full">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[500px]">
               <thead>
                 <tr className="border-b border-border">
                   {['Item','Qty Sold','Sales','Profit Margin'].map(h => (
@@ -340,6 +343,7 @@ export default function ReportsPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
 
           <p className="text-xs text-text-muted text-center mt-4">

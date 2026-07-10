@@ -3,6 +3,7 @@ import { query, getClient } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { deductInventoryForOrder, restockInventoryForOrder } from '../services/inventoryService';
 import { applyPaymentToOrder } from '../services/paymentservice';
+import { logAudit } from '../services/auditLog';
 
 // Timestamp slice alone can collide under concurrent load (two orders in
 // the same second, or across multiple app instances/replicas). The random
@@ -169,7 +170,23 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
   const client = await getClient();
   try {
     await client.query('BEGIN');
-    const { type, table_id, customer_id, customer_name, guests, items, special_instructions, payment_method } = req.body;
+    const { type, table_id, customer_id, customer_name, guests, items, special_instructions, payment_method, client_reference_id } = req.body;
+
+    // Idempotency check first, before any other validation — this is what
+    // makes it safe for the offline sync queue to retry a submission it's
+    // not sure succeeded (e.g. the response was lost after the server had
+    // already committed), and incidentally also protects against a
+    // double-tap on "Checkout" during a slow response. Same reference
+    // twice returns the order that already exists rather than creating a
+    // second one or erroring.
+    if (client_reference_id) {
+      const existing = await client.query('SELECT * FROM orders WHERE client_reference_id = $1', [client_reference_id]);
+      if (existing.rows.length) {
+        await client.query('ROLLBACK');
+        res.status(200).json({ success: true, data: existing.rows[0], idempotent_replay: true });
+        return;
+      }
+    }
 
     if (!Array.isArray(items) || items.length === 0) {
       await client.query('ROLLBACK');
@@ -242,11 +259,11 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
 
     const orderResult = await client.query(`
       INSERT INTO orders (order_number, type, status, table_id, customer_id, customer_name, guests,
-        subtotal, service_charge, tax, total, special_instructions, served_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        subtotal, service_charge, tax, total, special_instructions, served_by, client_reference_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
       RETURNING *
     `, [generateOrderNumber(), type, initialStatus, table_id || null, customer_id || null, customer_name || null,
-        guests || 1, subtotal, service_charge, tax, total, special_instructions || null, req.user!.id]);
+        guests || 1, subtotal, service_charge, tax, total, special_instructions || null, req.user!.id, client_reference_id || null]);
 
     const order = orderResult.rows[0];
 
@@ -394,7 +411,21 @@ export const processPayment = async (req: AuthRequest, res: Response): Promise<v
   try {
     await client.query('BEGIN');
     const { id } = req.params;
-    const { payment_method, amount, reference, split_details, award_loyalty, points } = req.body;
+    const { payment_method, amount, reference, split_details, award_loyalty, points, client_reference_id } = req.body;
+
+    if (client_reference_id) {
+      const existing = await client.query('SELECT * FROM payments WHERE client_reference_id = $1', [client_reference_id]);
+      if (existing.rows.length) {
+        await client.query('ROLLBACK');
+        const orderNow = await client.query('SELECT status, amount_paid, total FROM orders WHERE id = $1', [id]);
+        res.status(200).json({
+          success: true, data: existing.rows[0], idempotent_replay: true,
+          order_status: orderNow.rows[0]?.status,
+          balance_remaining: orderNow.rows[0] ? Math.max(0, Number(orderNow.rows[0].total) - Number(orderNow.rows[0].amount_paid)) : 0,
+        });
+        return;
+      }
+    }
 
     if (!['cash', 'card', 'split', 'points'].includes(payment_method)) {
       await client.query('ROLLBACK');
@@ -518,14 +549,15 @@ export const processPayment = async (req: AuthRequest, res: Response): Promise<v
     // many ways, per-person share) for the receipt, not separate payment
     // rows per person.
     const paymentResult = await client.query(`
-      INSERT INTO payments (order_id, payment_method, amount, status, reference, split_details, points_redeemed, processed_by)
-      VALUES ($1,$2,$3,'completed',$4,$5,$6,$7) RETURNING *
+      INSERT INTO payments (order_id, payment_method, amount, status, reference, split_details, points_redeemed, processed_by, client_reference_id)
+      VALUES ($1,$2,$3,'completed',$4,$5,$6,$7,$8) RETURNING *
     `, [
       id, payment_method, roundedAmount,
       reference || null,
       split_details ? JSON.stringify(split_details) : null,
       payment_method === 'points' ? pointsToRedeem : null,
       req.user!.id,
+      client_reference_id || null,
     ]);
 
     if (outcome.stockWarnings.length > 0) {
@@ -610,13 +642,14 @@ interface RefundParams {
   restock: boolean;       // return this order's ingredients to stock?
   isVoid: boolean;
   performedBy: string;
+  req: AuthRequest;
 }
 
 const REFUND_METHODS = ['cash', 'mpesa', 'card', 'store_credit'];
 
 const processRefund = async (
   res: Response,
-  { orderId, amount, reason, method, restock, isVoid, performedBy }: RefundParams
+  { orderId, amount, reason, method, restock, isVoid, performedBy, req }: RefundParams
 ): Promise<void> => {
   const client = await getClient();
   try {
@@ -744,6 +777,12 @@ const processRefund = async (
     }
 
     await client.query('COMMIT');
+    await logAudit(req, {
+      action: isVoid ? 'order_voided' : 'order_refunded',
+      entityType: 'order',
+      entityId: orderId,
+      details: { order_number: order.order_number, amount: requested, reason: reason || null, method: refundMethod, restock, full_refund: isFullRefund },
+    });
     res.json({
       success: true,
       data: refundRow.rows[0],
@@ -775,6 +814,7 @@ export const refundOrder = async (req: AuthRequest, res: Response): Promise<void
     restock: restock === true,
     isVoid: false,
     performedBy: req.user!.id,
+    req,
   });
 };
 
@@ -792,5 +832,6 @@ export const voidOrder = async (req: AuthRequest, res: Response): Promise<void> 
     restock: restock === false ? false : true,
     isVoid: true,
     performedBy: req.user!.id,
+    req,
   });
 };

@@ -1,6 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Search, RefreshCw, MoreVertical, UserPlus, Shield, Users, UserCheck, UserMinus, Wallet, Check, X, Edit2, KeyRound, UserX, UserCheck2 } from 'lucide-react';
 import api from '@/lib/api';
+import { confirmDelete } from '@/lib/confirmPreference';
+import { ROLE_PERMISSIONS, NAV_KEYS, type NavKey } from '@/lib/rolePermissions';
+
+const NAV_KEY_LABELS: Record<NavKey, string> = {
+  dashboard: 'Dashboard', pos: 'POS', orders: 'Orders', kitchen: 'Kitchen', tables: 'Tables',
+  menu: 'Menu', inventory: 'Inventory', purchases: 'Purchases',
+  customers: 'Customers', loyalty: 'Loyalty',
+  reports: 'Reports', expenses: 'Expenses',
+  staff: 'Staff', scheduling: 'Scheduling',
+  settings: 'Settings',
+};
 import { formatDate, getInitials, toLocalDateString } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
 import { PageHeader, StatusBadge, Pagination, Modal, LoadingPage } from '@/components/ui';
@@ -32,20 +43,11 @@ const ROLE_LABEL: Record<string, string> = {
 
 const ROLES = ['administrator','manager','head_chef','cashier','waiter','kitchen_staff','cleaner'];
 
-// What each role can actually access right now — fixed in how the system is
-// built, not a configurable permissions matrix. Same real breakdown shown
-// in Settings > Users & Permissions; kept here too since "Manage Roles" is
-// where people look for it from this page specifically.
-const ROLE_ACCESS: Array<{ role: string; access: boolean[] }> = [
-  { role: 'Administrator', access: [true, true, true, true, true, true, true] },
-  { role: 'Manager', access: [true, true, true, true, true, true, true] },
-  { role: 'Head Chef', access: [true, false, true, true, false, false, false] },
-  { role: 'Cashier', access: [true, true, true, false, false, false, false] },
-  { role: 'Waiter', access: [true, true, true, false, false, false, false] },
-  { role: 'Kitchen Staff', access: [true, false, true, false, false, false, false] },
-  { role: 'Cleaner', access: [true, false, false, false, false, false, false] },
-];
-const ROLE_ACCESS_COLUMNS = ['Dashboard','POS','Orders','Inventory','Reports','Staff','Settings'];
+// Role → access table for the "Manage Roles" panel now comes directly from
+// the same shared module (lib/rolePermissions.ts) the Sidebar filters
+// navigation with — previously this was its own separate, coarser
+// hardcoded table with no connection to what the Sidebar actually showed
+// or hid, so the two could silently drift apart.
 
 function randomPassword(): string {
   // Real random default instead of a fixed, guessable string that would
@@ -147,7 +149,7 @@ export default function StaffPage() {
   const toggleActive = async (m: StaffMember) => {
     setOpenMenuId(null);
     const nextStatus = m.status === 'inactive' ? 'active' : 'inactive';
-    if (nextStatus === 'inactive' && !confirm(`Deactivate ${m.full_name}? They won't be able to log in until reactivated.`)) return;
+    if (nextStatus === 'inactive' && !confirmDelete(`Deactivate ${m.full_name}? They won't be able to log in until reactivated.`)) return;
     try {
       await api.put(`/staff/${m.id}`, { full_name: m.full_name, email: m.email, phone: m.phone, role: m.role, schedule_type: m.schedule_type, status: nextStatus });
       toast.success(nextStatus === 'inactive' ? `${m.full_name} deactivated` : `${m.full_name} reactivated`);
@@ -177,7 +179,7 @@ export default function StaffPage() {
   // Rejecting just leaves the account permanently unable to log in; it
   // isn't deleted, so there's a record of the request having existed.
   const decideApproval = async (user: PendingUser, decision: 'approved' | 'rejected') => {
-    if (decision === 'rejected' && !confirm(`Decline ${user.full_name}'s request? They will not be able to log in.`)) return;
+    if (decision === 'rejected' && !confirmDelete(`Decline ${user.full_name}'s request? They will not be able to log in.`)) return;
     setDecidingId(user.id);
     try {
       const res = await api.put(`/staff/${user.id}/approval`, { approval_status: decision });
@@ -195,7 +197,7 @@ export default function StaffPage() {
   const totalForDistrib = roleDistrib.reduce((s, r) => s + r.count, 0);
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex flex-col md:flex-row h-full overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Staff" subtitle="Manage your team members, roles and permissions">
           <button onClick={openAdd} className="btn-primary flex items-center gap-2 text-sm">
@@ -204,7 +206,7 @@ export default function StaffPage() {
         </PageHeader>
 
         {/* Stats cards */}
-        <div className="grid grid-cols-5 gap-3 mb-5">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
           {[
             { label: 'Total Staff', value: stats.total, Icon: Users, sub: 'Active team members', color: 'text-text-primary' },
             { label: 'Active Staff', value: stats.active, Icon: UserCheck, sub: 'Currently working', color: 'text-status-success' },
@@ -314,7 +316,7 @@ export default function StaffPage() {
       </div>
 
       {/* Right sidebar */}
-      <div className="w-[260px] shrink-0 border-l border-border bg-surface-card flex flex-col overflow-y-auto p-4 space-y-5">
+      <div className="w-full md:w-[260px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col overflow-y-auto p-4 space-y-5 max-h-[60vh] md:max-h-none">
         {/* Staff Overview donut */}
         <div>
           <h2 className="section-title text-sm mb-3">Staff Overview</h2>
@@ -511,16 +513,16 @@ export default function StaffPage() {
               <thead className="bg-surface-50">
                 <tr>
                   <th className="table-header px-3 py-2 text-left">Role</th>
-                  {ROLE_ACCESS_COLUMNS.map(h => <th key={h} className="table-header px-3 py-2 text-left">{h}</th>)}
+                  {NAV_KEYS.map(k => <th key={k} className="table-header px-3 py-2 text-left">{NAV_KEY_LABELS[k]}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {ROLE_ACCESS.map(r => (
-                  <tr key={r.role} className="table-row">
-                    <td className="table-cell font-medium text-xs">{r.role}</td>
-                    {r.access.map((can, i) => (
-                      <td key={i} className="table-cell text-xs">
-                        <span className={can ? 'text-status-success' : 'text-text-muted'}>{can ? '✓' : '—'}</span>
+                {Object.entries(ROLE_PERMISSIONS).map(([role, access]) => (
+                  <tr key={role} className="table-row">
+                    <td className="table-cell font-medium text-xs">{ROLE_LABEL[role] || role}</td>
+                    {NAV_KEYS.map(k => (
+                      <td key={k} className="table-cell text-xs">
+                        <span className={access[k] ? 'text-status-success' : 'text-text-muted'}>{access[k] ? '✓' : '—'}</span>
                       </td>
                     ))}
                   </tr>

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query, getClient } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
+import { logAudit } from '../services/auditLog';
 
 export const getMenuItems = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -191,7 +192,7 @@ export const getMenuItemByBarcode = async (req: Request, res: Response): Promise
   }
 };
 
-export const deleteMenuItem = async (req: Request, res: Response): Promise<void> => {
+export const deleteMenuItem = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     // Soft-delete: set status to 'archived' rather than hard-deleting.
     // Hard deletion breaks historical order_items rows that reference this
@@ -200,10 +201,11 @@ export const deleteMenuItem = async (req: Request, res: Response): Promise<void>
     // The POS and kitchen already filter on status='available', so archived
     // items naturally disappear from operational views without losing history.
     const result = await query(
-      `UPDATE menu_items SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING id`,
+      `UPDATE menu_items SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING id, name`,
       [req.params.id]
     );
     if (!result.rows.length) { res.status(404).json({ success: false, message: 'Item not found' }); return; }
+    await logAudit(req, { action: 'menu_item_deleted', entityType: 'menu_item', entityId: req.params.id, details: { name: result.rows[0].name } });
     res.json({ success: true, message: 'Item archived' });
   } catch (error) {
     console.error(error);

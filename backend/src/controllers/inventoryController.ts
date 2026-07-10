@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query, getClient } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
+import { logAudit } from '../services/auditLog';
 
 export const getInventory = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -217,13 +218,14 @@ export const deleteInventoryItem = async (req: AuthRequest, res: Response): Prom
   try {
     const { id } = req.params;
     const result = await query(
-      `UPDATE inventory_items SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND is_active = true RETURNING id`,
+      `UPDATE inventory_items SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND is_active = true RETURNING id, name`,
       [id]
     );
     if (!result.rows.length) {
       res.status(404).json({ success: false, message: 'Item not found' });
       return;
     }
+    await logAudit(req, { action: 'inventory_item_deleted', entityType: 'inventory_item', entityId: id, details: { name: result.rows[0].name } });
     res.json({ success: true, message: 'Item archived' });
   } catch (error) {
     console.error(error);

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { query } from '../config/database';
+import { logAudit } from '../services/auditLog';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
@@ -50,6 +51,7 @@ export const updateSettings = async (req: AuthRequest, res: Response): Promise<v
         ON CONFLICT (key) DO UPDATE SET value = $2, updated_by = $3, updated_at = CURRENT_TIMESTAMP
       `, [key, updates[key], req.user!.id]);
     }
+    await logAudit(req, { action: 'settings_updated', entityType: 'settings', details: { keys } });
     res.json({ success: true, message: 'Settings saved' });
   } catch (error) {
     console.error(error);

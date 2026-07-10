@@ -360,9 +360,9 @@ export default function KitchenPage() {
       )}
 
       {/* Kanban columns */}
-      <div className="flex-1 flex gap-0 overflow-hidden">
+      <div className="flex-1 flex gap-0 overflow-x-auto">
         {/* New Orders */}
-        <div className="flex-1 flex flex-col border-r border-border">
+        <div className="flex-1 min-w-[280px] flex flex-col border-r border-border">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-brand">🛒</span>
@@ -383,7 +383,7 @@ export default function KitchenPage() {
         </div>
 
         {/* Preparing */}
-        <div className="flex-1 flex flex-col border-r border-border">
+        <div className="flex-1 min-w-[280px] flex flex-col border-r border-border">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-status-warning">🍳</span>
@@ -402,7 +402,7 @@ export default function KitchenPage() {
         </div>
 
         {/* Ready */}
-        <div className="flex-1 flex flex-col border-r border-border">
+        <div className="flex-1 min-w-[280px] flex flex-col border-r border-border">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-status-success">✅</span>
@@ -421,7 +421,7 @@ export default function KitchenPage() {
         </div>
 
         {/* Completed */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 min-w-[280px] flex flex-col">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-status-purple">✓</span>
@@ -454,7 +454,7 @@ export default function KitchenPage() {
       </div>
 
       {/* Bottom stats */}
-      <div className="grid grid-cols-5 border-t border-border bg-surface-card">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 border-t border-border bg-surface-card">
         {[
           { icon: '🛒', label: 'New Orders', value: newOrders.length, sub: 'Total pending' },
           { icon: '🍳', label: 'Preparing', value: preparingOrders.length, sub: 'In progress' },

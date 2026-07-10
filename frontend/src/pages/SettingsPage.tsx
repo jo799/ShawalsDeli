@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Save, Trash2, ChevronRight, Download, Upload, RefreshCw, Shield, Database, HardDrive, Activity, Info } from 'lucide-react';
+import { Save, Trash2, ChevronRight, Download, Upload, RefreshCw, Shield, Database, HardDrive, Activity, Info, ScrollText } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { useAuthStore } from '@/store/authStore';
+import { setConfirmBeforeDelete } from '@/lib/confirmPreference';
 import { Modal } from '@/components/ui';
 import api from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
-const TABS = ['General','Business','POS & Payments','Notifications','Users & Permissions','Backup & Restore','Integrations','System'];
+const TABS = ['General','Business','POS & Payments','Notifications','Users & Permissions','Backup & Restore','Audit Log','Integrations','System'];
 
 const Toggle = ({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) => (
   <button onClick={() => onChange(!value)}
@@ -74,7 +75,7 @@ export default function SettingsPage() {
   // which. See the note in the General tab about what's actually wired to
   // behavior elsewhere in the app today.
   const [prefs, setPrefs] = useState({
-    auto_logout: '30 Minutes', confirm_before_delete: true, enable_sound_alerts: true, compact_view: false,
+    auto_logout: '30 Minutes', confirm_before_delete: true, otp_login_enabled: true,
   });
   const [business, setBusiness] = useState({
     business_name: '', business_address: '', business_email: '', business_phone: '', tax_pin: '', website: '',
@@ -84,6 +85,9 @@ export default function SettingsPage() {
   const [invoiceSettings, setInvoiceSettings] = useState({ po_number_prefix: 'PO', invoice_footer_note: '' });
   const [tableSettings, setTableSettings] = useState({ default_reservation_duration_minutes: '90', default_table_capacity: '4' });
   const [kdsSettings, setKdsSettings] = useState({ kds_refresh_interval_seconds: '30', kds_sound_alert_enabled: true });
+  const [posSettings, setPosSettings] = useState({
+    pos_default_payment_method: 'Cash', pos_enable_mpesa: true, pos_enable_card: true, pos_enable_points_redemption: true,
+  });
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showTableModal, setShowTableModal] = useState(false);
@@ -93,6 +97,13 @@ export default function SettingsPage() {
   const [storage, setStorage] = useState<StorageUsage | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [backups, setBackups] = useState<Backup[]>([]);
+  const [auditLogs, setAuditLogs] = useState<Array<{ id: string; user_name?: string; user_email?: string; action: string; entity_type?: string; entity_id?: string; details?: Record<string, unknown>; ip_address?: string; created_at: string }>>([]);
+  const [auditActions, setAuditActions] = useState<string[]>([]);
+  const [auditActionFilter, setAuditActionFilter] = useState('');
+  const [auditStartDate, setAuditStartDate] = useState('');
+  const [auditEndDate, setAuditEndDate] = useState('');
+  const [auditPagination, setAuditPagination] = useState({ total: 0, page: 1, limit: 50 });
+  const [loadingAudit, setLoadingAudit] = useState(false);
   const [creatingBackup, setCreatingBackup] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
 
@@ -113,8 +124,7 @@ export default function SettingsPage() {
       }));
       if (s.auto_logout) setPrefs(p => ({ ...p, auto_logout: s.auto_logout }));
       if (s.confirm_before_delete !== undefined) setPrefs(p => ({ ...p, confirm_before_delete: s.confirm_before_delete === 'true' }));
-      if (s.enable_sound_alerts !== undefined) setPrefs(p => ({ ...p, enable_sound_alerts: s.enable_sound_alerts === 'true' }));
-      if (s.compact_view !== undefined) setPrefs(p => ({ ...p, compact_view: s.compact_view === 'true' }));
+      if (s.otp_login_enabled !== undefined) setPrefs(p => ({ ...p, otp_login_enabled: s.otp_login_enabled === 'true' }));
       setReceiptSettings(p => ({
         receipt_footer_message: s.receipt_footer_message ?? p.receipt_footer_message,
         receipt_show_customer_name: s.receipt_show_customer_name !== undefined ? s.receipt_show_customer_name === 'true' : p.receipt_show_customer_name,
@@ -130,6 +140,12 @@ export default function SettingsPage() {
       setKdsSettings(p => ({
         kds_refresh_interval_seconds: s.kds_refresh_interval_seconds ?? p.kds_refresh_interval_seconds,
         kds_sound_alert_enabled: s.kds_sound_alert_enabled !== undefined ? s.kds_sound_alert_enabled === 'true' : p.kds_sound_alert_enabled,
+      }));
+      setPosSettings(p => ({
+        pos_default_payment_method: s.pos_default_payment_method ?? p.pos_default_payment_method,
+        pos_enable_mpesa: s.pos_enable_mpesa !== undefined ? s.pos_enable_mpesa === 'true' : p.pos_enable_mpesa,
+        pos_enable_card: s.pos_enable_card !== undefined ? s.pos_enable_card === 'true' : p.pos_enable_card,
+        pos_enable_points_redemption: s.pos_enable_points_redemption !== undefined ? s.pos_enable_points_redemption === 'true' : p.pos_enable_points_redemption,
       }));
     } catch { toast.error('Failed to load settings'); }
     finally { setLoading(false); }
@@ -150,16 +166,36 @@ export default function SettingsPage() {
     }
   }, [activeTab, canBackup]);
 
+  useEffect(() => {
+    if (activeTab === 'Audit Log' && canBackup) {
+      api.get('/audit-logs/actions').then(r => setAuditActions(r.data.data)).catch(() => {});
+      fetchAuditLogs();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, canBackup]);
+
+  const fetchAuditLogs = async (page = 1) => {
+    setLoadingAudit(true);
+    try {
+      const { data } = await api.get('/audit-logs', {
+        params: { page, limit: 50, action: auditActionFilter || undefined, start_date: auditStartDate || undefined, end_date: auditEndDate || undefined },
+      });
+      setAuditLogs(data.data);
+      setAuditPagination({ total: data.pagination.total, page: data.pagination.page, limit: data.pagination.limit });
+    } catch { toast.error('Failed to load audit log'); }
+    finally { setLoadingAudit(false); }
+  };
+
   const saveGeneral = async () => {
     setSaving(true);
     try {
       await api.put('/settings', {
         auto_logout: prefs.auto_logout,
         confirm_before_delete: String(prefs.confirm_before_delete),
-        enable_sound_alerts: String(prefs.enable_sound_alerts),
-        compact_view: String(prefs.compact_view),
+        otp_login_enabled: String(prefs.otp_login_enabled),
         ...business,
       });
+      setConfirmBeforeDelete(prefs.confirm_before_delete);
       toast.success('Settings saved');
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to save settings';
@@ -275,8 +311,7 @@ export default function SettingsPage() {
                 <div className="card p-4">
                   <h2 className="section-title mb-2">Preferences</h2>
                   <p className="text-xs text-text-muted mb-2">
-                    These are saved, but only Auto Logout and Confirm Before Delete are wired to real behavior right now —
-                    Sound Alerts and Compact View are saved for later, not yet applied anywhere in the app.
+                    Auto Logout is now actually enforced — the app watches for real activity and signs you out after this much idle time, regardless of which page is open.
                   </p>
                   <SettingRow label="Auto Logout" description="Automatically log out after inactivity">
                     <select className="select text-xs py-1 w-32" value={prefs.auto_logout} onChange={e => setPrefs(p => ({ ...p, auto_logout: e.target.value }))}>
@@ -286,12 +321,14 @@ export default function SettingsPage() {
                   <SettingRow label="Confirm Before Delete" description="Show confirmation dialog before deleting records">
                     <Toggle value={prefs.confirm_before_delete} onChange={v => setPrefs(p => ({ ...p, confirm_before_delete: v }))} />
                   </SettingRow>
-                  <SettingRow label="Enable Sound Alerts" description="Play sound for notifications and alerts">
-                    <Toggle value={prefs.enable_sound_alerts} onChange={v => setPrefs(p => ({ ...p, enable_sound_alerts: v }))} />
+                  <SettingRow label="Email Login Code (2FA)" description="Require a 6-digit code sent by email on every login, on top of the password">
+                    <Toggle value={prefs.otp_login_enabled} onChange={v => setPrefs(p => ({ ...p, otp_login_enabled: v }))} />
                   </SettingRow>
-                  <SettingRow label="Compact View" description="Reduce spacing for more compact view">
-                    <Toggle value={prefs.compact_view} onChange={v => setPrefs(p => ({ ...p, compact_view: v }))} />
-                  </SettingRow>
+                  {prefs.otp_login_enabled && (
+                    <p className="text-[11px] text-text-muted -mt-1 mb-2">
+                      Sent via the same email provider used for password resets — everyone logging in will need email access at that moment. Adds a step to every login, including shift-change logins on a shared POS terminal.
+                    </p>
+                  )}
                 </div>
 
                 {/* Business Profile */}
@@ -465,6 +502,47 @@ export default function SettingsPage() {
           {activeTab === 'POS & Payments' && (
             <div className="max-w-2xl space-y-6">
               <h2 className="section-title">POS & Payment Settings</h2>
+
+              <div className="card p-4 space-y-3">
+                <h3 className="font-semibold text-sm">Payment Methods at Checkout</h3>
+                <p className="text-xs text-text-muted">
+                  Controls which tender buttons actually appear at POS checkout — Cash is always available and can't be turned off.
+                </p>
+                <SettingRow label="Default Payment Method" description="Which method is pre-selected when checkout opens">
+                  <select className="select text-xs py-1 w-32" value={posSettings.pos_default_payment_method}
+                    onChange={e => setPosSettings(p => ({ ...p, pos_default_payment_method: e.target.value }))}>
+                    <option value="Cash">Cash</option>
+                    {posSettings.pos_enable_mpesa && <option value="M-Pesa">M-Pesa</option>}
+                    {posSettings.pos_enable_card && <option value="Card">Card</option>}
+                  </select>
+                </SettingRow>
+                <SettingRow label="Accept M-Pesa" description="Show the M-Pesa button at checkout">
+                  <Toggle value={posSettings.pos_enable_mpesa} onChange={v => setPosSettings(p => ({ ...p, pos_enable_mpesa: v, pos_default_payment_method: !v && p.pos_default_payment_method === 'M-Pesa' ? 'Cash' : p.pos_default_payment_method }))} />
+                </SettingRow>
+                <SettingRow label="Accept Card" description="Show the Card button at checkout">
+                  <Toggle value={posSettings.pos_enable_card} onChange={v => setPosSettings(p => ({ ...p, pos_enable_card: v, pos_default_payment_method: !v && p.pos_default_payment_method === 'Card' ? 'Cash' : p.pos_default_payment_method }))} />
+                </SettingRow>
+                <SettingRow label="Allow Loyalty Point Redemption" description="Let cashiers redeem a customer's points toward a bill at POS">
+                  <Toggle value={posSettings.pos_enable_points_redemption} onChange={v => setPosSettings(p => ({ ...p, pos_enable_points_redemption: v }))} />
+                </SettingRow>
+                <button onClick={() => savePanel({
+                  pos_default_payment_method: posSettings.pos_default_payment_method,
+                  pos_enable_mpesa: String(posSettings.pos_enable_mpesa),
+                  pos_enable_card: String(posSettings.pos_enable_card),
+                  pos_enable_points_redemption: String(posSettings.pos_enable_points_redemption),
+                }, () => {}, 'POS payment settings')} disabled={savingPanel} className="btn-primary text-sm disabled:opacity-50">
+                  {savingPanel ? 'Saving…' : 'Save Payment Settings'}
+                </button>
+              </div>
+
+              <div className="card p-4 space-y-2">
+                <h3 className="font-semibold text-sm">Loyalty Point Value</h3>
+                <p className="text-xs text-text-muted">
+                  The KES value of one point when redeemed lives on the Loyalty Points page (it's used there for the same redemption math shown to cashiers), rather than duplicated here where the two copies could drift out of sync.
+                </p>
+                <a href="/loyalty" className="btn-secondary text-xs inline-flex items-center gap-1.5 w-fit">Go to Loyalty Points →</a>
+              </div>
+
               <div className="card p-4 space-y-2">
                 <h3 className="font-semibold text-sm">Pricing</h3>
                 <p className="text-xs text-text-muted">
@@ -583,6 +661,78 @@ export default function SettingsPage() {
                       <Trash2 size={13} /> Clear All Data
                     </button>
                   </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'Audit Log' && (
+            <div className="space-y-5">
+              <h2 className="section-title flex items-center gap-2"><ScrollText size={18} /> Audit Log</h2>
+              {!canBackup ? (
+                <div className="card p-5 text-center">
+                  <Shield size={24} className="text-text-muted mx-auto mb-2" />
+                  <p className="text-xs text-text-muted">A record of who did what across the whole system — restricted to administrators.</p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs text-text-muted max-w-2xl">
+                    Every login attempt (successful or not), staff role/status change, refund or void, and deletion
+                    across the system is recorded here — this is what makes "who did this" an answerable question
+                    instead of a guess.
+                  </p>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <select className="select text-xs py-1.5 w-48" value={auditActionFilter} onChange={e => setAuditActionFilter(e.target.value)}>
+                      <option value="">All Actions</option>
+                      {auditActions.map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}
+                    </select>
+                    <input type="date" className="input text-xs py-1.5 w-36" value={auditStartDate} onChange={e => setAuditStartDate(e.target.value)} placeholder="From" />
+                    <input type="date" className="input text-xs py-1.5 w-36" value={auditEndDate} onChange={e => setAuditEndDate(e.target.value)} placeholder="To" />
+                    <button onClick={() => fetchAuditLogs(1)} className="btn-secondary text-xs py-1.5 flex items-center gap-1.5"><RefreshCw size={12} /> Apply</button>
+                  </div>
+
+                  <div className="card overflow-x-auto">
+                    <table className="w-full min-w-[700px]">
+                      <thead className="bg-surface-50">
+                        <tr>
+                          {['When', 'Who', 'Action', 'Details', 'IP'].map(h => (
+                            <th key={h} className="table-header px-4 py-2 text-left">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {loadingAudit ? (
+                          <tr><td colSpan={5} className="py-8 text-center text-text-muted text-sm">Loading…</td></tr>
+                        ) : auditLogs.length === 0 ? (
+                          <tr><td colSpan={5} className="py-8 text-center text-text-muted text-sm">No matching audit events</td></tr>
+                        ) : auditLogs.map(log => (
+                          <tr key={log.id} className="table-row">
+                            <td className="table-cell text-xs text-text-muted whitespace-nowrap">{formatDate(log.created_at)} {new Date(log.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}</td>
+                            <td className="table-cell text-xs">{log.user_name || <span className="text-text-muted">Unknown</span>}</td>
+                            <td className="table-cell text-xs">
+                              <span className={`badge text-[11px] ${log.action.includes('failed') || log.action.includes('deleted') || log.action.includes('refund') || log.action.includes('void') ? 'badge-error' : log.action.includes('success') || log.action.includes('created') ? 'badge-success' : 'badge-muted'}`}>
+                                {log.action.replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="table-cell text-[11px] text-text-muted max-w-xs truncate">
+                              {log.entity_type && <span>{log.entity_type}{log.entity_id ? ` · ${String(log.entity_id).slice(0, 8)}` : ''} </span>}
+                              {log.details ? JSON.stringify(log.details) : ''}
+                            </td>
+                            <td className="table-cell text-[11px] text-text-muted">{log.ip_address || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {auditPagination.total > auditPagination.limit && (
+                    <div className="flex items-center justify-between text-xs text-text-muted">
+                      <span>{auditPagination.total} total events</span>
+                      <div className="flex gap-2">
+                        <button disabled={auditPagination.page <= 1} onClick={() => fetchAuditLogs(auditPagination.page - 1)} className="btn-secondary text-xs py-1 px-2 disabled:opacity-40">Previous</button>
+                        <button disabled={auditPagination.page * auditPagination.limit >= auditPagination.total} onClick={() => fetchAuditLogs(auditPagination.page + 1)} className="btn-secondary text-xs py-1 px-2 disabled:opacity-40">Next</button>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>

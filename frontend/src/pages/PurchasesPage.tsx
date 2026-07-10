@@ -283,7 +283,7 @@ export default function PurchasesPage() {
   };
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex flex-col md:flex-row h-full overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Purchases" subtitle="Manage purchase orders and supplier deliveries">
           <label className="btn-secondary flex items-center gap-1.5 text-sm cursor-pointer">
@@ -296,7 +296,7 @@ export default function PurchasesPage() {
         </PageHeader>
 
         {/* Stats */}
-        <div className="grid grid-cols-5 gap-3 mb-5">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
           {[
             { label: 'Total POs', value: stats.total_pos, Icon: ShoppingCart, sub: 'This month', color: 'text-text-primary' },
             { label: 'Total Spent', value: formatCurrency(stats.total_spent || 0), Icon: Wallet, sub: 'This month', color: 'text-brand' },
@@ -411,7 +411,7 @@ export default function PurchasesPage() {
 
       {/* Detail Panel */}
       {selected && (
-        <div className="w-[320px] shrink-0 border-l border-border bg-surface-card flex flex-col overflow-y-auto">
+        <div className="w-full md:w-[320px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col overflow-y-auto max-h-[60vh] md:max-h-none">
           <div className="p-4 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
               <h2 className="font-bold">Purchase Order</h2>
@@ -493,7 +493,7 @@ export default function PurchasesPage() {
       {/* New PO Modal */}
       <Modal open={showNew} onClose={() => setShowNew(false)} title="New Purchase Order" size="xl">
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs text-text-muted mb-1">Supplier *</label>
               {form.supplier_id === '__custom__' ? (
@@ -530,7 +530,8 @@ export default function PurchasesPage() {
               <label className="text-xs font-semibold text-text-primary">Order Items</label>
               <button onClick={addFormItem} className="text-xs text-brand hover:text-brand-400">+ Add Item</button>
             </div>
-            <div className="space-y-2">
+            <div className="overflow-x-auto">
+            <div className="space-y-2 min-w-[600px]">
               {form.items.map((item, i) => (
                 <div key={i} className="grid grid-cols-5 gap-2 items-end">
                   <div className="col-span-2">
@@ -585,6 +586,7 @@ export default function PurchasesPage() {
                 </div>
               ))}
             </div>
+            </div>
             <div className="mt-3 pt-3 border-t border-border flex justify-between text-sm font-bold">
               <span>Estimated Total</span>
               <span className="text-brand">{formatCurrency(formTotal - (parseFloat(form.discount) || 0))}</span>
@@ -611,7 +613,8 @@ export default function PurchasesPage() {
               Enter what actually arrived for each item. Partial deliveries are fine — leave the rest for a later delivery.
               Items linked to inventory will have their stock updated automatically.
             </p>
-            <div className="space-y-2">
+            <div className="overflow-x-auto">
+            <div className="space-y-2 min-w-[550px]">
               {selected.items?.map(item => {
                 const outstanding = Math.round((Number(item.quantity_ordered) - Number(item.quantity_received)) * 1000) / 1000;
                 const fullyReceived = outstanding <= 0;
@@ -638,6 +641,7 @@ export default function PurchasesPage() {
                   </div>
                 );
               })}
+            </div>
             </div>
             <div className="flex gap-3 pt-2">
               <button onClick={() => setShowReceive(false)} className="btn-secondary flex-1">Cancel</button>

@@ -45,10 +45,70 @@ app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
 // Tighter limit on auth endpoints to prevent credential stuffing / brute force.
 // 10 attempts per 15 minutes per IP is generous for a POS (cashiers log in
 // once at shift start) but still blocks automated attacks.
+app.use('/api/auth/setup', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { success: false, message: 'Too many attempts. Please wait before trying again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+}));
+
 app.use('/api/auth/login', rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
   message: { success: false, message: 'Too many login attempts. Please wait 15 minutes before trying again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+}));
+
+// Self-service signup — generous enough for a real new hire but not for
+// spinning up a flood of pending accounts.
+app.use('/api/auth/register', rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { success: false, message: 'Too many signup attempts from this network. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+}));
+
+// forgot-password already replies with the same generic message whether or
+// not the account exists, so this isn't primarily about email enumeration —
+// it's about not letting someone repeatedly trigger reset emails at a real
+// user as harassment, and not burning through the transactional email
+// provider's quota.
+app.use('/api/auth/forgot-password', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { success: false, message: 'Too many password reset requests. Please wait before trying again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+}));
+
+app.use('/api/auth/verify-reset-otp', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  message: { success: false, message: 'Too many attempts. Please wait before trying again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+}));
+
+app.use('/api/auth/reset-password', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { success: false, message: 'Too many attempts. Please wait before trying again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+}));
+
+// A 6-digit OTP has a million possible values — the per-code attempt cap
+// in verifyLoginOtp (5 wrong guesses burns that specific code) is the
+// first brake; this is the second, limiting how many different codes/login
+// attempts one client can even try in a window regardless of which code
+// they're currently guessing against.
+app.use('/api/auth/verify-otp', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  message: { success: false, message: 'Too many attempts. Please wait before trying again.' },
   standardHeaders: true,
   legacyHeaders: false,
 }));
@@ -68,6 +128,19 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Health check
 app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), service: "Shawal's Deli API" });
+});
+
+// Same check, also reachable under /api — the frontend's offline-detection
+// heartbeat (useOnlineStatus) hits this one specifically rather than the
+// bare /health above. Every other request this app makes already goes
+// through /api and is proven to reach the backend correctly in whatever
+// way this gets deployed (same-origin reverse proxy, or otherwise); a
+// brand-new top-level path would need its own separate proxy/CORS rule
+// that isn't guaranteed to exist wherever this actually runs. Registered
+// before the main router is mounted so there's no ambiguity about it ever
+// being shadowed by anything inside `routes`.
+app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), service: "Shawal's Deli API" });
 });
 

@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, Download, X, Edit2, Trash2, Upload, FileText } from 'lucide-react';
 import api from '@/lib/api';
+import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, formatDate, toLocalDateString } from '@/lib/utils';
 import { PageHeader, Pagination, SearchInput, LoadingPage, Modal } from '@/components/ui';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
@@ -105,7 +106,7 @@ export function ExpensesPage() {
   };
 
   const deleteExpense = async (exp: Expense) => {
-    if (!confirm(`Delete "${exp.title}" (${formatCurrency(exp.amount)})? This cannot be undone.`)) return;
+    if (!confirmDelete(`Delete "${exp.title}" (${formatCurrency(exp.amount)})? This cannot be undone.`)) return;
     try {
       await api.delete(`/expenses/${exp.id}`);
       toast.success('Expense deleted');
@@ -163,7 +164,7 @@ export function ExpensesPage() {
   const totalExpense = byCategory.reduce((s, c) => s + c.total, 0);
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex flex-col md:flex-row h-full overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Expenses" subtitle="Track and manage business expenses">
           <button onClick={exportCsv} disabled={expenses.length === 0} className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50"><Download size={13} /> Export</button>
@@ -176,7 +177,7 @@ export function ExpensesPage() {
             spent; "Average per Day" divided that same unscoped total by a
             fixed 30; "Over Budget" was a fixed string. budget_limit already
             existed on expense_categories — nothing was ever reading it. */}
-        <div className="grid grid-cols-4 gap-3 mb-5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
           {[
             { label: 'Total Expenses', value: formatCurrency(summary.total), icon: '💳', sub: `${summary.count} transactions` },
             {
@@ -277,7 +278,7 @@ export function ExpensesPage() {
       </div>
 
       {/* Right panel */}
-      <div className="w-[260px] shrink-0 border-l border-border bg-surface-card flex flex-col overflow-y-auto">
+      <div className="w-full md:w-[260px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col overflow-y-auto max-h-[60vh] md:max-h-none">
         {selectedExpense ? (
           <div className="p-4">
             <div className="flex items-center justify-between mb-4">

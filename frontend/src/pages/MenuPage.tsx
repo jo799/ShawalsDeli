@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Search, Grid, List, Star, Edit2, Trash2, X, RotateCcw } from 'lucide-react';
 import api from '@/lib/api';
+import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, cn, resolveMenuImage, menuImagePlaceholder } from '@/lib/utils';
 import { PageHeader, StatusBadge, Modal, LoadingPage } from '@/components/ui';
 import toast from 'react-hot-toast';
@@ -21,7 +22,7 @@ const EMPTY_ITEM = {
 export default function MenuPage() {
   const [items, setItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [activeTab, setActiveTab] = useState('All Items');
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null); // null = "All Items"
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(''); // '' = active items (backend default excludes archived)
@@ -42,7 +43,13 @@ export default function MenuPage() {
       const [itemsRes, catRes] = await Promise.all([
         api.get('/menu/items', {
           params: {
-            category_id: activeTab !== 'All Items' ? categories.find(c => c.name === activeTab.split(' ')[0])?.id : undefined,
+            // Was matching by parsing the tab's display label
+            // (activeTab.split(' ')[0]) — only ever took the FIRST WORD,
+            // so "Main Dishes 12" resolved to looking for a category
+            // literally named "Main", which doesn't exist. Worked by
+            // accident for single-word categories, silently matched
+            // nothing (and so filtered nothing) for every multi-word one.
+            category_id: activeCategoryId || undefined,
             search: search || undefined,
             status: statusFilter || undefined,
             page, limit: LIMIT
@@ -57,7 +64,7 @@ export default function MenuPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, [activeTab, page, statusFilter]);
+  useEffect(() => { fetchData(); }, [activeCategoryId, page, statusFilter]);
   useEffect(() => { const t = setTimeout(fetchData, 400); return () => clearTimeout(t); }, [search]);
 
   const openEdit = (item?: MenuItem) => {
@@ -117,7 +124,7 @@ export default function MenuPage() {
   };
 
   const deleteItem = async (id: string) => {
-    if (!confirm('Delete this menu item?')) return;
+    if (!confirmDelete('Delete this menu item?')) return;
     try {
       await api.delete(`/menu/items/${id}`);
       toast.success('Item deleted');
@@ -133,7 +140,7 @@ export default function MenuPage() {
     } catch { toast.error('Failed to restore item'); }
   };
 
-  const tabs = ['All Items', ...categories.map(c => `${c.name} ${c.item_count}`)];
+  const tabs = [{ id: null as string | null, label: `All Items ${total}` }, ...categories.map(c => ({ id: c.id, label: `${c.name} ${c.item_count}` }))];
 
   // Small inline badge for countable items: green while comfortably stocked,
   // amber at/below the reorder level, red at zero. Returns null for items
@@ -151,7 +158,7 @@ export default function MenuPage() {
   };
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex flex-col md:flex-row h-full overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Menu" subtitle="Manage your menu items, categories and modifiers">
           <button className="btn-secondary text-sm">Categories</button>
@@ -164,13 +171,12 @@ export default function MenuPage() {
         {/* Category tabs */}
         <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1 flex-wrap">
           {tabs.map(tab => {
-            const name = tab.split(' ')[0];
-            const isActive = activeTab === tab;
+            const isActive = activeCategoryId === tab.id;
             return (
-              <button key={tab} onClick={() => { setActiveTab(tab); setPage(1); }}
+              <button key={tab.id ?? 'all'} onClick={() => { setActiveCategoryId(tab.id); setPage(1); }}
                 className={cn('px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors',
                   isActive ? 'bg-brand text-black' : 'bg-surface-50 border border-border text-text-secondary hover:text-text-primary')}>
-                {name === 'All' ? `All Items ${total}` : tab}
+                {tab.label}
               </button>
             );
           })}
@@ -298,7 +304,7 @@ export default function MenuPage() {
 
       {/* Edit panel */}
       {editing && (
-        <div className="w-[320px] shrink-0 border-l border-border bg-surface-card flex flex-col">
+        <div className="w-full md:w-[320px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col max-h-[60vh] md:max-h-none">
           <div className="flex items-center justify-between p-4 border-b border-border">
             <h2 className="section-title">{selected ? 'Edit Menu Item' : 'Add Menu Item'}</h2>
             <button onClick={() => setEditing(false)} className="btn-ghost p-1"><X size={16} /></button>

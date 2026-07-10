@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query } from '../config/database';
 import { AuthRequest } from '../middleware/auth';
+import { logAudit } from '../services/auditLog';
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
@@ -190,10 +191,11 @@ export const updateExpense = async (req: AuthRequest, res: Response): Promise<vo
   }
 };
 
-export const deleteExpense = async (req: Request, res: Response): Promise<void> => {
+export const deleteExpense = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const result = await query('DELETE FROM expenses WHERE id=$1 RETURNING id', [req.params.id]);
+    const result = await query('DELETE FROM expenses WHERE id=$1 RETURNING id, title, amount, category_id', [req.params.id]);
     if (!result.rows.length) { res.status(404).json({ success: false, message: 'Expense not found' }); return; }
+    await logAudit(req, { action: 'expense_deleted', entityType: 'expense', entityId: req.params.id, details: { title: result.rows[0].title, amount: result.rows[0].amount } });
     res.json({ success: true, message: 'Expense deleted' });
   } catch (error) {
     console.error(error);

@@ -123,7 +123,7 @@ export default function OrdersPage() {
   const typeIcon = (type: string) => ({ dine_in: '🪑', takeaway: '🛍️', delivery: '🛵' }[type] || '🪑');
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex flex-col md:flex-row h-full overflow-hidden">
       {/* Main list */}
       <div className="flex-1 flex flex-col overflow-hidden p-6">
         <PageHeader title="Orders" subtitle="Manage and track all restaurant orders">
@@ -196,7 +196,7 @@ export default function OrdersPage() {
 
       {/* Detail panel */}
       {selected && (
-        <div className="w-[340px] shrink-0 border-l border-border bg-surface-card flex flex-col overflow-y-auto">
+        <div className="w-full md:w-[340px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col overflow-y-auto max-h-[60vh] md:max-h-none">
           <div className="p-5 border-b border-border flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2 mb-1">

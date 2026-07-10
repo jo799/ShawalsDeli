@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { query } from '../config/database';
 import bcrypt from 'bcryptjs';
 import { AuthRequest } from '../middleware/auth';
+import { logAudit } from '../services/auditLog';
 
 const VALID_ROLES = ['administrator', 'manager', 'head_chef', 'cashier', 'waiter', 'kitchen_staff', 'cleaner'];
 const VALID_STATUSES = ['active', 'on_leave', 'inactive'];
@@ -52,7 +53,7 @@ export const getStaff = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-export const createStaff = async (req: Request, res: Response): Promise<void> => {
+export const createStaff = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { full_name, email, phone, role, schedule_type, joined_date, password } = req.body;
     if (!full_name || !email || !password) {
@@ -86,6 +87,7 @@ export const createStaff = async (req: Request, res: Response): Promise<void> =>
       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::date, CURRENT_DATE),'approved')
       RETURNING id, full_name, email, phone, role, status, approval_status, schedule_type, joined_date, created_at
     `, [full_name, trimmedEmail, phone || null, passwordHash, role || 'waiter', schedule_type || 'full_time', joined_date || null]);
+    await logAudit(req, { action: 'staff_created', entityType: 'user', entityId: result.rows[0].id, details: { full_name, email: trimmedEmail, role: role || 'waiter' } });
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) {
     console.error(error);
@@ -97,7 +99,7 @@ export const createStaff = async (req: Request, res: Response): Promise<void> =>
 // from updateStaff below — this is a one-time decision on an account that
 // isn't "staff" yet, not a routine edit to an existing staff member's
 // details, and it's worth keeping that distinction visible in the API.
-export const setApprovalStatus = async (req: Request, res: Response): Promise<void> => {
+export const setApprovalStatus = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const { approval_status, role } = req.body;
@@ -121,6 +123,7 @@ export const setApprovalStatus = async (req: Request, res: Response): Promise<vo
       res.status(404).json({ success: false, message: 'No pending signup found with that id (it may have already been decided)' });
       return;
     }
+    await logAudit(req, { action: approval_status === 'approved' ? 'staff_approved' : 'staff_rejected', entityType: 'user', entityId: id, details: { full_name: result.rows[0].full_name, role: result.rows[0].role } });
     res.json({
       success: true,
       data: result.rows[0],
@@ -183,6 +186,12 @@ export const updateStaff = async (req: AuthRequest, res: Response): Promise<void
       }
     }
 
+    // Fetched before the update specifically so the audit log can record an
+    // actual role or status CHANGE (and what it changed from/to) rather than
+    // just "this record was edited" — a role escalation is the kind of
+    // thing worth being able to find later, a phone number typo fix isn't.
+    const before = await query('SELECT role, status FROM users WHERE id = $1', [id]);
+
     const result = await query(`
       UPDATE users SET full_name=$1, email=COALESCE($2, email), phone=$3, role=COALESCE($4, role),
         status=COALESCE($5, status), schedule_type=$6, updated_at=CURRENT_TIMESTAMP
@@ -190,7 +199,16 @@ export const updateStaff = async (req: AuthRequest, res: Response): Promise<void
       RETURNING id, full_name, email, phone, role, status, approval_status, schedule_type, joined_date, last_login, avatar_url
     `, [full_name.toString().trim(), trimmedEmail || null, phone || null, role || null, status || null, schedule_type || null, id]);
     if (!result.rows.length) { res.status(404).json({ success: false, message: 'Staff not found' }); return; }
-    res.json({ success: true, data: result.rows[0] });
+
+    const updated = result.rows[0];
+    if (before.rows.length && before.rows[0].role !== updated.role) {
+      await logAudit(req, { action: 'staff_role_changed', entityType: 'user', entityId: id, details: { full_name: updated.full_name, from: before.rows[0].role, to: updated.role } });
+    }
+    if (before.rows.length && before.rows[0].status !== updated.status) {
+      await logAudit(req, { action: updated.status === 'inactive' ? 'staff_deactivated' : 'staff_status_changed', entityType: 'user', entityId: id, details: { full_name: updated.full_name, from: before.rows[0].status, to: updated.status } });
+    }
+
+    res.json({ success: true, data: updated });
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -201,7 +219,7 @@ export const updateStaff = async (req: AuthRequest, res: Response): Promise<void
 // forgot-password flow (which requires the user to have email access and
 // wait for a link). Useful when someone's locked out and needs back in
 // right now, or when Brevo isn't configured at all yet.
-export const resetStaffPassword = async (req: Request, res: Response): Promise<void> => {
+export const resetStaffPassword = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const { password } = req.body;
@@ -215,6 +233,7 @@ export const resetStaffPassword = async (req: Request, res: Response): Promise<v
       [passwordHash, id]
     );
     if (!result.rows.length) { res.status(404).json({ success: false, message: 'Staff not found' }); return; }
+    await logAudit(req, { action: 'staff_password_reset_by_admin', entityType: 'user', entityId: id, details: { full_name: result.rows[0].full_name } });
     res.json({ success: true, message: `Password reset for ${result.rows[0].full_name}` });
   } catch (error) {
     console.error(error);
