@@ -2,16 +2,12 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Search, RefreshCw, MoreVertical, UserPlus, Shield, Users, UserCheck, UserMinus, Wallet, Check, X, Edit2, KeyRound, UserX, UserCheck2 } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
-import { ROLE_PERMISSIONS, NAV_KEYS, type NavKey } from '@/lib/rolePermissions';
-
-const NAV_KEY_LABELS: Record<NavKey, string> = {
-  dashboard: 'Dashboard', pos: 'POS', orders: 'Orders', kitchen: 'Kitchen', tables: 'Tables',
-  menu: 'Menu', inventory: 'Inventory', purchases: 'Purchases',
-  customers: 'Customers', loyalty: 'Loyalty',
-  reports: 'Reports', expenses: 'Expenses',
-  staff: 'Staff', scheduling: 'Scheduling',
-  settings: 'Settings',
-};
+// Relative import rather than the @shared/* alias — this file lives at a
+// fixed location (frontend/src/pages/StaffPage.tsx), three levels below
+// the project root where shared/permissions.ts lives, so this resolves
+// correctly in every tool with zero path-alias configuration required.
+// See authStore.ts for the same reasoning.
+import { ROLES, ROLE_PERMISSIONS, ROLE_LABELS, MATRIX_MODULES, type Role } from '../../../shared/permissions';
 import { formatDate, getInitials, toLocalDateString } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
 import { PageHeader, StatusBadge, Pagination, Modal, LoadingPage } from '@/components/ui';
@@ -36,17 +32,9 @@ const ROLE_BADGE: Record<string, string> = {
   cleaner: 'bg-status-success/10 text-status-success border border-status-success/20',
 };
 
-const ROLE_LABEL: Record<string, string> = {
-  administrator: 'Administrator', manager: 'Manager', head_chef: 'Head Chef',
-  cashier: 'Cashier', waiter: 'Waiter', kitchen_staff: 'Kitchen Staff', cleaner: 'Cleaner',
-};
-
-const ROLES = ['administrator','manager','head_chef','cashier','waiter','kitchen_staff','cleaner'];
-
-// Role → access table for the "Manage Roles" panel now comes directly from
-// the same shared module (lib/rolePermissions.ts) the Sidebar filters
-// navigation with — previously this was its own separate, coarser
-// hardcoded table with no connection to what the Sidebar actually showed
+// Role → access table for the "Manage Roles" panel comes directly from the
+// same canonical module (@shared/permissions) the Sidebar filters
+// navigation with, and that backend route guards are meant to agree with —
 // or hid, so the two could silently drift apart.
 
 function randomPassword(): string {
@@ -234,7 +222,7 @@ export default function StaffPage() {
           </div>
           <select className="select text-xs py-1.5 w-36" value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
             <option value="">All Roles</option>
-            {ROLES.map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+            {ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
           </select>
           <select className="select text-xs py-1.5 w-32" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
             <option value="">All Status</option>
@@ -276,7 +264,7 @@ export default function StaffPage() {
                       </td>
                       <td className="table-cell">
                         <span className={`badge text-xs ${ROLE_BADGE[member.role] || 'badge-muted'}`}>
-                          {ROLE_LABEL[member.role] || member.role}
+                          {ROLE_LABELS[member.role as Role] || member.role}
                         </span>
                       </td>
                       <td className="table-cell text-text-secondary text-xs">{member.phone || '—'}</td>
@@ -352,7 +340,7 @@ export default function StaffPage() {
               const pct = totalForDistrib ? Math.round(count / totalForDistrib * 100) : 0;
               return (
                 <div key={role} className="flex items-center gap-2 text-xs">
-                  <span className="text-text-secondary w-24 truncate">{ROLE_LABEL[role]}</span>
+                  <span className="text-text-secondary w-24 truncate">{ROLE_LABELS[role]}</span>
                   <div className="flex-1 h-1.5 bg-surface-50 rounded-full overflow-hidden">
                     <div className="h-full bg-brand rounded-full" style={{ width: `${pct}%` }} />
                   </div>
@@ -445,7 +433,7 @@ export default function StaffPage() {
                 disabled={editingId === currentUser?.id && currentUser?.role === 'administrator'}
                 title={editingId === currentUser?.id ? "You can't change your own role" : undefined}
               >
-                {ROLES.map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+                {ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
               </select>
             </div>
             <div>
@@ -513,16 +501,16 @@ export default function StaffPage() {
               <thead className="bg-surface-50">
                 <tr>
                   <th className="table-header px-3 py-2 text-left">Role</th>
-                  {NAV_KEYS.map(k => <th key={k} className="table-header px-3 py-2 text-left">{NAV_KEY_LABELS[k]}</th>)}
+                  {MATRIX_MODULES.map(m => <th key={m.key} className="table-header px-3 py-2 text-left">{m.label}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(ROLE_PERMISSIONS).map(([role, access]) => (
+                {ROLES.map(role => (
                   <tr key={role} className="table-row">
-                    <td className="table-cell font-medium text-xs">{ROLE_LABEL[role] || role}</td>
-                    {NAV_KEYS.map(k => (
-                      <td key={k} className="table-cell text-xs">
-                        <span className={access[k] ? 'text-status-success' : 'text-text-muted'}>{access[k] ? '✓' : '—'}</span>
+                    <td className="table-cell font-medium text-xs">{ROLE_LABELS[role] || role}</td>
+                    {MATRIX_MODULES.map(m => (
+                      <td key={m.key} className="table-cell text-xs">
+                        <span className={ROLE_PERMISSIONS[role].includes(m.key) ? 'text-status-success' : 'text-text-muted'}>{ROLE_PERMISSIONS[role].includes(m.key) ? '✓' : '—'}</span>
                       </td>
                     ))}
                   </tr>

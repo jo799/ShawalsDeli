@@ -8,29 +8,34 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import { useThemeStore } from '@/store/themeStore';
 import { getInitials } from '@/lib/utils';
-import { canAccess, type NavKey } from '@/lib/rolePermissions';
+// Relative import rather than the @shared/* alias — this file lives at a
+// fixed location (frontend/src/components/layout/Sidebar.tsx), four levels
+// below the project root where shared/permissions.ts lives, so this
+// resolves correctly in every tool with zero path-alias configuration
+// required. See authStore.ts for the same reasoning.
+import { canAccessRoute } from '../../../../shared/permissions';
 
-const NAV: Array<{ label: string; icon: typeof LayoutDashboard; to: string; key: NavKey } | { section: string; key?: undefined }> = [
-  { label: 'Dashboard', icon: LayoutDashboard, to: '/', key: 'dashboard' },
-  { label: 'POS', icon: ShoppingCart, to: '/pos', key: 'pos' },
-  { label: 'Orders', icon: ClipboardList, to: '/orders', key: 'orders' },
-  { label: 'Kitchen Display', icon: ChefHat, to: '/kitchen', key: 'kitchen' },
-  { label: 'Tables', icon: Table2, to: '/tables', key: 'tables' },
+const NAV: Array<{ label: string; icon: typeof LayoutDashboard; to: string } | { section: string; to?: undefined }> = [
+  { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
+  { label: 'POS', icon: ShoppingCart, to: '/pos' },
+  { label: 'Orders', icon: ClipboardList, to: '/orders' },
+  { label: 'Kitchen Display', icon: ChefHat, to: '/kitchen' },
+  { label: 'Tables', icon: Table2, to: '/tables' },
   { section: 'MENU & INVENTORY' },
-  { label: 'Menu', icon: UtensilsCrossed, to: '/menu', key: 'menu' },
-  { label: 'Inventory', icon: Package, to: '/inventory', key: 'inventory' },
-  { label: 'Purchases', icon: ShoppingBag, to: '/purchases', key: 'purchases' },
+  { label: 'Menu', icon: UtensilsCrossed, to: '/menu' },
+  { label: 'Inventory', icon: Package, to: '/inventory' },
+  { label: 'Purchases', icon: ShoppingBag, to: '/purchases' },
   { section: 'CUSTOMERS' },
-  { label: 'Customers', icon: Users, to: '/customers', key: 'customers' },
-  { label: 'Loyalty Points', icon: Star, to: '/loyalty', key: 'loyalty' },
+  { label: 'Customers', icon: Users, to: '/customers' },
+  { label: 'Loyalty Points', icon: Star, to: '/loyalty' },
   { section: 'FINANCE' },
-  { label: 'Reports', icon: BarChart3, to: '/reports', key: 'reports' },
-  { label: 'Expenses', icon: Receipt, to: '/expenses', key: 'expenses' },
+  { label: 'Reports', icon: BarChart3, to: '/reports' },
+  { label: 'Expenses', icon: Receipt, to: '/expenses' },
   { section: 'STAFF' },
-  { label: 'Staff', icon: UserSquare2, to: '/staff', key: 'staff' },
-  { label: 'Scheduling', icon: Calendar, to: '/scheduling', key: 'scheduling' },
+  { label: 'Staff', icon: UserSquare2, to: '/staff' },
+  { label: 'Scheduling', icon: Calendar, to: '/scheduling' },
   { section: 'SETTINGS' },
-  { label: 'Settings', icon: Settings, to: '/settings', key: 'settings' },
+  { label: 'Settings', icon: Settings, to: '/settings' },
 ];
 
 interface SidebarProps {
@@ -63,7 +68,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
   // visible under it (e.g. a waiter loses the whole "FINANCE" section
   // heading along with Reports and Expenses, rather than seeing an empty
   // label with nothing beneath it).
-  const visibleNav = NAV.filter(item => !item.key || canAccess(user?.role, item.key))
+  const visibleNav = NAV.filter(item => !item.to || canAccessRoute(user?.role, item.to))
     .filter((item, i, arr) => {
       if (!('section' in item)) return true;
       const next = arr[i + 1];
