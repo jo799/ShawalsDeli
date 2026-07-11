@@ -4,7 +4,9 @@
   "description": "Shawal's Deli Backend API",
   "main": "dist/server.js",
  "scripts": {
+  "predev": "node scripts/copy-shared-permissions.js",
   "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+  "prebuild": "node scripts/copy-shared-permissions.js",
   "build": "tsc",
   "start": "node dist/server.js",
   "db:migrate": "node -r ts-node/register src/migrations/migrate.ts",
