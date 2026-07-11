@@ -1,23 +1,22 @@
 import { useEffect } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import api from '@/lib/api';
-import type { Permission } from '@shared/permissions';
 
 export function AuthBootstrap({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, setSession, logout } = useAuthStore();
+  const { isAuthenticated, token, login, logout } = useAuthStore();
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || !token) return;
 
     api.get('/auth/profile')
       .then(({ data }) => {
         const profile = data.data;
-        setSession(profile, profile.permissions as Permission[]);
+        login(profile, token);
       })
       .catch(() => {
         logout();
       });
-  }, [isAuthenticated, setSession, logout]);
+  }, [isAuthenticated, token, login, logout]);
 
   return <>{children}</>;
 }
