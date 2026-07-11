@@ -49,12 +49,21 @@ export const menuImagePlaceholder = (name?: string): string => {
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 };
 
-// Resolve a stored image_url for display. Uploaded images are same-origin paths
-// like "/uploads/menu/xyz.jpg"; absolute URLs (http/https/data) pass through
-// untouched. Empty/missing values yield the branded placeholder.
+// Resolve a stored image_url for display. Uploaded images are stored as
+// same-origin-looking paths like "/uploads/menu/xyz.jpg" — accurate when
+// frontend and backend share a domain, but on Railway they're two separate
+// services on two separate domains, so a bare "/uploads/..." path would
+// try to load from the frontend's own domain instead of the backend that
+// actually serves it. VITE_API_URL (already used for API calls — see
+// lib/api.ts) doubles as the source for the backend's origin here, minus
+// its /api suffix. Absolute URLs (http/https/data) pass through untouched;
+// empty/missing values yield the branded placeholder.
+const BACKEND_ORIGIN = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, '');
+
 export const resolveMenuImage = (imageUrl?: string, name?: string): string => {
   if (!imageUrl) return menuImagePlaceholder(name);
-  return imageUrl;
+  if (/^(https?:|data:)/.test(imageUrl)) return imageUrl;
+  return BACKEND_ORIGIN ? `${BACKEND_ORIGIN}${imageUrl}` : imageUrl;
 };
 
 export const getStatusColor = (status: string): string => {

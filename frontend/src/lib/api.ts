@@ -1,7 +1,15 @@
 import axios from 'axios';
 
+// In local dev, '/api' is enough — Vite's dev server proxies it straight to
+// the backend on localhost (see vite.config.ts). That only works because
+// dev serves both from the same origin. On Railway, frontend and backend
+// are two separate services on two separate domains, so a relative '/api'
+// would try to reach the API on the frontend's own domain, where nothing is
+// listening. VITE_API_URL, when set, points this at the real backend URL
+// instead — set it to the backend service's full Railway URL plus /api,
+// e.g. https://shawalsdeli-backend-production.up.railway.app/api
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   timeout: 30000,
 });
 
