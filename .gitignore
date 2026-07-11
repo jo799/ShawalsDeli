@@ -8,3 +8,4 @@ build/
 uploads/
 .DS_Store
 coverage/
+backend/src/_shared/
