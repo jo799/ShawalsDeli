@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ChefHat, Volume2, VolumeX, Maximize2, RefreshCw, CheckCircle, ShoppingCart, Flame, CheckCheck, Timer } from 'lucide-react';
+import { ChefHat, Volume2, VolumeX, Maximize2, RefreshCw, CheckCircle, ShoppingCart, Flame, CheckCheck, Timer, Pencil } from 'lucide-react';
 import api from '@/lib/api';
 import { formatTime, toLocalDateString } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -9,6 +9,7 @@ interface Order {
   table_number?: string; customer_name?: string;
   created_at: string; completed_at?: string;
   total?: number; amount_paid?: number;
+  special_instructions?: string;
   items?: Array<{ item_name: string; quantity: number }>;
 }
 
@@ -67,6 +68,13 @@ function OrderCard({ order, onAction, compact }: { order: Order; onAction: (id: 
           <p className="text-xs text-text-muted">+{(order.items?.length || 0) - 4} more items</p>
         )}
       </div>
+
+      {order.special_instructions && (
+        <div className="flex items-start gap-1.5 bg-status-warning/10 border border-status-warning/30 rounded-lg px-2 py-1.5 mb-3">
+          <Pencil size={11} className="text-status-warning shrink-0 mt-0.5" />
+          <p className="text-xs text-status-warning font-medium">{order.special_instructions}</p>
+        </div>
+      )}
 
       {order.status === 'new' && (
         <button
