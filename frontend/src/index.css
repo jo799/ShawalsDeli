@@ -382,15 +382,22 @@
     color: #000;
     font-weight: 700;
     width: 100%;
-    padding: 0.875rem 0;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 0.875rem 0.75rem;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    font-size: 1rem;
+    font-size: 0.875rem;
     letter-spacing: 0.01em;
     border-radius: 0.5rem;
     transition: color 0.15s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  @media (min-width: 640px) {
+    .pos-checkout-btn { font-size: 1rem; padding-left: 0; padding-right: 0; }
   }
 
   .pos-checkout-btn:hover { background-color: rgb(var(--color-brand-400)); }

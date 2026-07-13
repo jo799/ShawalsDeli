@@ -966,17 +966,17 @@ export default function POSPage() {
         <button
           type="button"
           onClick={e => { e.stopPropagation(); setShowMobileCart(true); }}
-          className="md:hidden fixed bottom-4 left-4 right-4 z-30 pos-checkout-btn shadow-lg"
+          className="md:hidden fixed bottom-4 left-4 right-4 z-30 flex items-center gap-2 py-3.5 px-4 rounded-lg bg-brand text-black font-bold shadow-lg"
         >
-          <ShoppingCart size={18} />
-          <span>Cart ({itemCount})</span>
-          <span className="ml-auto font-black">{formatCurrency(activeOrder ? Math.max(0, activeOrder.total - activeOrder.amount_paid) : total)}</span>
+          <ShoppingCart size={18} className="shrink-0" />
+          <span className="truncate">Cart ({itemCount})</span>
+          <span className="ml-auto shrink-0 font-black">{formatCurrency(activeOrder ? Math.max(0, activeOrder.total - activeOrder.amount_paid) : total)}</span>
         </button>
       )}
 
       {/* ══════════════ RIGHT — Cart ══════════════ */}
       <div
-        className={`bg-surface-card flex flex-col min-h-0 md:w-[340px] md:shrink-0 md:border-l md:border-border md:max-h-none ${
+        className={`bg-surface-card flex flex-col min-h-0 w-full max-w-full overflow-x-hidden md:w-[340px] md:shrink-0 md:border-l md:border-border md:max-h-none ${
           showMobileCart
             ? 'fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] rounded-t-2xl border-t border-border shadow-modal'
             : 'hidden md:flex'
@@ -1101,7 +1101,7 @@ export default function POSPage() {
         </div>
 
         {/* ── Totals — now showing the real breakdown the backend charges ── */}
-        <div className="px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-border space-y-3 shrink-0">
+        <div className="w-full min-w-0 max-w-full overflow-x-hidden px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-border space-y-3 shrink-0">
           {activeOrder ? (
             <>
               {/* Once an order exists, the authoritative numbers come from
@@ -1175,22 +1175,27 @@ export default function POSPage() {
             </div>
           )}
 
-          {/* Payment method buttons */}
-          <div className={`grid gap-2 mt-1 ${availableMethods.length <= 2 ? 'grid-cols-2' : availableMethods.length === 3 ? 'grid-cols-3' : availableMethods.length >= 5 ? 'grid-cols-5' : 'grid-cols-4'}`}>
+          {/* Payment method buttons — 2 columns on phones so labels don't overflow */}
+          <div className={`grid gap-2 mt-1 min-w-0 w-full ${
+            availableMethods.length <= 2 ? 'grid-cols-2'
+            : availableMethods.length === 3 ? 'grid-cols-2 md:grid-cols-3'
+            : availableMethods.length === 4 ? 'grid-cols-2 md:grid-cols-4'
+            : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-5'
+          }`}>
             {availableMethods.map(m => (
               <button
                 key={m}
                 onClick={() => setPaymentMethod(m)}
                 disabled={activeOrder !== null && m === 'Split Bill'}
                 title={activeOrder !== null && m === 'Split Bill' ? 'Split Bill divides a fresh order — cancel this order to use it' : undefined}
-                className={`py-3 rounded-xl text-xs font-bold transition-colors flex flex-col items-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed ${
+                className={`min-w-0 py-3 px-1 rounded-xl text-[10px] sm:text-xs font-bold transition-colors flex flex-col items-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed ${
                   paymentMethod === m
                     ? 'bg-brand text-black shadow-brand'
                     : 'bg-surface-50 text-text-secondary hover:text-text-primary border border-border hover:border-brand/30'
                 }`}
               >
                 {m === 'Cash' ? <Banknote size={17} /> : m === 'M-Pesa' ? <Smartphone size={17} /> : m === 'Card' ? <CreditCard size={17} /> : m === 'Points' ? <Star size={17} /> : <Shuffle size={17} />}
-                {m}
+                <span className="truncate w-full text-center leading-tight">{m}</span>
               </button>
             ))}
           </div>
@@ -1202,9 +1207,17 @@ export default function POSPage() {
             className="pos-checkout-btn disabled:opacity-50 disabled:cursor-not-allowed mt-1"
           >
             {processingPayment
-              ? <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-              : <ShoppingCart size={17} />}
-            {processingPayment ? 'Processing...' : activeOrder ? `Charge ${formatCurrency(tenderAmount ? Number(tenderAmount) : Math.max(0, activeOrder.total - activeOrder.amount_paid))}` : !isOnline ? 'Complete Sale (Offline)   F2' : 'Checkout   F2'}
+              ? <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin shrink-0" />
+              : <ShoppingCart size={17} className="shrink-0" />}
+            <span className="truncate">
+              {processingPayment
+                ? 'Processing...'
+                : activeOrder
+                  ? `Charge ${formatCurrency(tenderAmount ? Number(tenderAmount) : Math.max(0, activeOrder.total - activeOrder.amount_paid))}`
+                  : !isOnline
+                    ? (isMobile ? 'Complete Sale' : 'Complete Sale (Offline)   F2')
+                    : (isMobile ? 'Checkout' : 'Checkout   F2')}
+            </span>
           </button>
 
           {activeOrder && (
