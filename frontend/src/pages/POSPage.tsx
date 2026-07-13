@@ -9,6 +9,7 @@ import api from '@/lib/api';
 import { enqueueSale } from '@/lib/offlineSync/queue';
 import { saveCartDraft, loadCartDraft, clearCartDraft } from '@/lib/posCartPersistence';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, resolveMenuImage, menuImagePlaceholder } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -83,6 +84,8 @@ export default function POSPage() {
   // since it's the one method that always has to work.
   const [posConfig, setPosConfig] = useState({ defaultMethod: 'Cash', enableMpesa: true, enableCard: true, enablePointsRedemption: true });
   const isOnline = useOnlineStatus();
+  const { isMobile } = useBreakpoint();
+  const [showMobileCart, setShowMobileCart] = useState(false);
   const [pointsToRedeem, setPointsToRedeem] = useState('');
 
   // ── Multi-tender payment state ─────────────────────────────────────────
@@ -187,6 +190,10 @@ export default function POSPage() {
   }, []);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  useEffect(() => {
+    if (!isMobile) setShowMobileCart(false);
+  }, [isMobile]);
   useEffect(() => { api.get('/loyalty/stats').then(r => setPointValueKes(r.data.data.point_value_kes)).catch(() => {}); }, []);
 
   // Persists the in-progress sale so a refresh or navigating away and back
@@ -414,6 +421,7 @@ export default function POSPage() {
       setAwardLoyalty(true);
       setPointsToRedeem('');
       setSplitPaymentMethod('cash');
+      setShowMobileCart(false);
       clearCartDraft();
     } else {
       setActiveOrder(prev => prev ? { ...prev, amount_paid: prev.total - balanceRemaining } : prev);
@@ -483,6 +491,7 @@ export default function POSPage() {
       setTenderAmount('');
       setSelectedCustomer(null);
       setAwardLoyalty(true);
+      setShowMobileCart(false);
       clearCartDraft();
     } catch {
       toast.error('Failed to queue this sale locally — please try again');
@@ -552,7 +561,7 @@ export default function POSPage() {
       toast.success('M-Pesa payment confirmed!');
       setTimeout(() => {
         setShowMpesaModal(false); setCart([]); setActiveOrder(null); setTenderAmount('');
-        setSelectedCustomer(null); clearCartDraft();
+        setSelectedCustomer(null); setShowMobileCart(false); clearCartDraft();
       }, 1500);
     }
   };
@@ -677,6 +686,7 @@ export default function POSPage() {
     setOrderType(h.type === 'dine_in' ? 'Dine In' : h.type === 'takeaway' ? 'Takeaway' : 'Delivery');
     setSelectedTableId(h.table_id || null);
     setShowHeldPanel(false);
+    if (isMobile) setShowMobileCart(true);
     try {
       await api.delete(`/held-orders/${h.id}`);
       fetchHeldOrders();
@@ -714,12 +724,12 @@ export default function POSPage() {
   /* ─────────────────────────────────────────────────────────────────── */
   return (
     <div
-      className="flex flex-col md:flex-row h-screen overflow-hidden"
+      className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden"
       onClick={() => { setShowTablePicker(false); setShowTypePicker(false); setShowHeldPanel(false); }}
     >
 
       {/* ══════════════ LEFT — Menu ══════════════ */}
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden p-4 gap-3">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden p-4 gap-3 pb-24 md:pb-4">
 
         {/* Top bar */}
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -932,28 +942,75 @@ export default function POSPage() {
           >
             <Trash2 size={14} /> <span className="hidden lg:inline">Clear Cart</span>
           </button>
-          <button className="btn-secondary py-2.5 px-4 text-sm flex items-center gap-2" title="Items">
+          <button
+            onClick={() => { if (isMobile) setShowMobileCart(true); }}
+            className="btn-secondary py-2.5 px-4 text-sm flex items-center gap-2"
+            title="View cart"
+          >
             <ShoppingCart size={14} /> <span className="hidden sm:inline">Items</span> ({itemCount})
           </button>
         </div>
       </div>
 
+      {/* Mobile cart backdrop */}
+      {showMobileCart && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/50 z-40"
+          onClick={() => setShowMobileCart(false)}
+          aria-hidden
+        />
+      )}
+
+      {/* Floating cart bar — phones only; opens the full cart sheet */}
+      {!showMobileCart && (
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); setShowMobileCart(true); }}
+          className="md:hidden fixed bottom-4 left-4 right-4 z-30 pos-checkout-btn shadow-lg"
+        >
+          <ShoppingCart size={18} />
+          <span>Cart ({itemCount})</span>
+          <span className="ml-auto font-black">{formatCurrency(activeOrder ? Math.max(0, activeOrder.total - activeOrder.amount_paid) : total)}</span>
+        </button>
+      )}
+
       {/* ══════════════ RIGHT — Cart ══════════════ */}
-      <div className="w-full md:w-[340px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col max-h-[50vh] md:max-h-none">
+      <div
+        className={`bg-surface-card flex flex-col min-h-0 md:w-[340px] md:shrink-0 md:border-l md:border-border md:max-h-none ${
+          showMobileCart
+            ? 'fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] rounded-t-2xl border-t border-border shadow-modal'
+            : 'hidden md:flex'
+        }`}
+        onClick={e => e.stopPropagation()}
+      >
+
+        {/* Sheet handle — mobile only */}
+        <div className="md:hidden flex justify-center pt-2.5 pb-1 shrink-0">
+          <div className="w-10 h-1 rounded-full bg-border" />
+        </div>
 
         {/* Table header */}
-        <div className="px-5 py-4 border-b border-border flex items-center justify-between flex-wrap gap-2">
+        <div className="px-5 py-3 md:py-4 border-b border-border flex items-center justify-between flex-wrap gap-2 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <ShoppingCart size={17} className="text-brand shrink-0" />
             <span className="font-bold text-base truncate">
               {orderType === 'Dine In' ? (selectedTable ? `Table ${selectedTable.table_number}` : 'Dine In — no table selected') : orderType}
             </span>
           </div>
-          {orderType === 'Dine In' && (
-            <button onClick={() => setShowTablePicker(true)} className="text-sm text-brand font-medium hover:text-brand-400 shrink-0">
-              {selectedTable ? 'Change' : 'Select table'}
+          <div className="flex items-center gap-2 shrink-0">
+            {orderType === 'Dine In' && (
+              <button onClick={() => setShowTablePicker(true)} className="text-sm text-brand font-medium hover:text-brand-400">
+                {selectedTable ? 'Change' : 'Select table'}
+              </button>
+            )}
+            <button
+              onClick={() => setShowMobileCart(false)}
+              className="md:hidden btn-ghost p-1.5 -mr-1"
+              aria-label="Close cart"
+            >
+              <X size={18} />
             </button>
-          )}
+          </div>
         </div>
 
         {/* Customer + loyalty */}
@@ -1044,7 +1101,7 @@ export default function POSPage() {
         </div>
 
         {/* ── Totals — now showing the real breakdown the backend charges ── */}
-        <div className="px-5 py-4 border-t border-border space-y-3">
+        <div className="px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-border space-y-3 shrink-0">
           {activeOrder ? (
             <>
               {/* Once an order exists, the authoritative numbers come from

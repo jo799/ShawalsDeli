@@ -37,7 +37,7 @@ export default function AppLayout() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <MobileHeader onMenuClick={() => setMobileNavOpen(true)} />
         <OfflineIndicator />
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto min-h-0 flex flex-col">
           <Outlet />
         </main>
       </div>
