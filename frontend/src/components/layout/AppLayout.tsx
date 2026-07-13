@@ -14,10 +14,18 @@ export default function AppLayout() {
   const { isTabletOrLarger } = useBreakpoint();
 
   useEffect(() => {
-    api.get('/settings').then(r => {
-      if (r.data.data.auto_logout) setAutoLogoutDuration(r.data.data.auto_logout);
-      if (r.data.data.confirm_before_delete !== undefined) setConfirmBeforeDelete(r.data.data.confirm_before_delete === 'true');
-    }).catch(() => {});
+    const loadSettings = async () => {
+      try {
+        const { data } = await api.get('/settings');
+        if (data.data.auto_logout) setAutoLogoutDuration(data.data.auto_logout);
+        if (data.data.confirm_before_delete !== undefined) {
+          setConfirmBeforeDelete(data.data.confirm_before_delete === 'true');
+        }
+      } catch {
+        // Non-critical — keep the default auto-logout and confirm preferences.
+      }
+    };
+    void loadSettings();
   }, []);
 
   useAutoLogout(autoLogoutDuration);
@@ -37,7 +45,7 @@ export default function AppLayout() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <MobileHeader onMenuClick={() => setMobileNavOpen(true)} />
         <OfflineIndicator />
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           <Outlet />
         </main>
       </div>
