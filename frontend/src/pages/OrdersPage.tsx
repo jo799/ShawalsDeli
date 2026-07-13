@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Filter, Eye } from 'lucide-react';
 import api from '@/lib/api';
@@ -51,7 +51,7 @@ export default function OrdersPage() {
   const [refundRestock, setRefundRestock] = useState(false);
   const [refunding, setRefunding] = useState(false);
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
       const status = statusMap[activeTab];
@@ -62,10 +62,10 @@ export default function OrdersPage() {
       setPagination({ total: data.pagination.total, pages: data.pagination.pages });
     } catch { toast.error('Failed to load orders'); }
     finally { setLoading(false); }
-  };
+  }, [activeTab, search, page]);
 
-  useEffect(() => { fetchOrders(); }, [activeTab, page]);
-  useEffect(() => { const t = setTimeout(fetchOrders, 400); return () => clearTimeout(t); }, [search]);
+  useEffect(() => { fetchOrders(); }, [activeTab, page, fetchOrders]);
+  useEffect(() => { const t = setTimeout(fetchOrders, 400); return () => clearTimeout(t); }, [search, fetchOrders]);
 
   const printReceipt = async (orderId: string) => {
     try {

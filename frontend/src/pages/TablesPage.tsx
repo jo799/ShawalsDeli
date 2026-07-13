@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, RefreshCw, LayoutGrid, List, Armchair, Circle, ShoppingCart, ArrowLeftRight, Receipt, Merge, Printer, X, Eye } from 'lucide-react';
 import api from '@/lib/api';
@@ -88,7 +88,7 @@ export default function TablesPage() {
   // upcoming confirmed/seated reservation regardless of date).
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const [tablesRes, resRes] = await Promise.all([
@@ -107,9 +107,9 @@ export default function TablesPage() {
       setReservations(resRes.data.data);
     } catch { toast.error('Failed to load tables'); }
     finally { setLoading(false); }
-  };
+  }, [showAllUpcoming]);
 
-  useEffect(() => { fetchData(); }, [showAllUpcoming]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   // Manual override — the system otherwise only learns a table is free when
   // staff completes (or cancels) its order (see ordersController). This is

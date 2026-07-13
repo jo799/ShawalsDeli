@@ -158,7 +158,7 @@ export default function KitchenPage() {
     };
   }, []);
 
-  const playAlertTone = () => {
+  const playAlertTone = useCallback(() => {
     try {
       const ctx = getAudioCtx();
       // Belt-and-suspenders: some browsers re-suspend a context after a
@@ -172,7 +172,7 @@ export default function KitchenPage() {
       osc.connect(gain); gain.connect(ctx.destination);
       osc.start(); osc.stop(ctx.currentTime + 0.4);
     } catch { /* Web Audio unavailable — silently skip rather than break the page */ }
-  };
+  }, []);
 
   useEffect(() => {
     api.get('/settings').then(r => {
@@ -266,7 +266,7 @@ export default function KitchenPage() {
       if (consecutiveFailures.current >= 2) setFetchFailing(true);
     }
     finally { setLoading(false); }
-  }, [soundEnabled]);
+  }, [soundEnabled, playAlertTone]);
 
   useEffect(() => {
     fetchOrders();

@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search, Scan, ShoppingCart, X, Plus, Minus,
   Trash2, ChevronDown, Phone, CheckCircle, AlertCircle, Loader,
-  Pause, Save, Banknote, Smartphone, CreditCard, Shuffle, User, Star
+  Pause, Save, Banknote, Smartphone, CreditCard, Shuffle, User, Star, Pencil
 } from 'lucide-react';
 import api from '@/lib/api';
 import { enqueueSale } from '@/lib/offlineSync/queue';
@@ -67,6 +67,12 @@ export default function POSPage() {
   // necessarily wanting to earn points on this particular sale (e.g. a
   // staff discount).
   const [selectedCustomer, setSelectedCustomer] = useState<{ id: string; full_name: string; phone?: string; available_points?: number } | null>(() => cartDraft?.selectedCustomer ?? null);
+  // "Add special instructions" used to be a dead button with no onClick at
+  // all — the backend already has a real special_instructions column on
+  // orders (and on order_items, for per-item notes), so this was only ever
+  // missing the frontend wiring, not a backend gap.
+  const [specialInstructions, setSpecialInstructions] = useState('');
+  const [showInstructionsInput, setShowInstructionsInput] = useState(false);
   const [awardLoyalty, setAwardLoyalty] = useState(true);
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   // Scan — a real USB barcode scanner behaves as a keyboard: it "types" the
@@ -321,13 +327,13 @@ export default function POSPage() {
   // needs an actual call to Safaricom (there's no way to queue that), and
   // Split Bill / Points both need a live, current balance to check against
   // rather than a possibly-stale local number.
-  const availableMethods = [
+  const availableMethods = useMemo(() => [
     'Cash',
     ...(posConfig.enableMpesa && isOnline ? ['M-Pesa'] : []),
     ...(posConfig.enableCard ? ['Card'] : []),
     ...(isOnline ? ['Split Bill'] : []),
     ...(posConfig.enablePointsRedemption && isOnline && (selectedCustomer?.available_points || 0) > 0 ? ['Points'] : []),
-  ];
+  ], [posConfig.enableMpesa, posConfig.enableCard, posConfig.enablePointsRedemption, isOnline, selectedCustomer?.available_points]);
   const maxPointsUsable = Math.min(
     selectedCustomer?.available_points || 0,
     pointValueKes > 0 ? Math.floor(balanceDueDisplay / pointValueKes) : 0
@@ -360,6 +366,7 @@ export default function POSPage() {
       customer_name: selectedCustomer?.full_name || 'Walk-in Customer',
       guests: 1,
       items: cart.map(c => ({ menu_item_id: c.id, item_name: c.name, quantity: c.quantity, unit_price: c.price })),
+      special_instructions: specialInstructions || undefined,
       payment_method: paymentMethodHint,
     });
     refreshOrderCount(); // reflect this terminal's own order without waiting for the next poll tick
@@ -419,6 +426,7 @@ export default function POSPage() {
       );
       printReceipt(order.id);
       setCart([]);
+      setSpecialInstructions(''); setShowInstructionsInput(false);
       setMobileCartOpen(false);
       setActiveOrder(null);
       setTenderAmount('');
@@ -485,12 +493,14 @@ export default function POSPage() {
           customer_name: selectedCustomer?.full_name || 'Walk-in Customer',
           guests: 1,
           items: cart.map(c => ({ menu_item_id: c.id, item_name: c.name, quantity: c.quantity, unit_price: c.price })),
+          special_instructions: specialInstructions || undefined,
           payment_method: method,
         },
         { payment_method: method, amount: total, award_loyalty: awardLoyalty }
       );
       toast.success(`Sale queued (${formatCurrency(total)}) — will sync automatically once back online`, { icon: '📥', duration: 5000 });
       setCart([]);
+      setSpecialInstructions(''); setShowInstructionsInput(false);
       setMobileCartOpen(false);
       setActiveOrder(null);
       setTenderAmount('');
@@ -565,6 +575,7 @@ export default function POSPage() {
       toast.success('M-Pesa payment confirmed!');
       setTimeout(() => {
         setShowMpesaModal(false); setCart([]); setActiveOrder(null); setTenderAmount('');
+        setSpecialInstructions(''); setShowInstructionsInput(false);
         setMobileCartOpen(false);
         setSelectedCustomer(null); clearCartDraft();
       }, 1500);
@@ -676,6 +687,7 @@ export default function POSPage() {
       });
       toast.success(label ? `Draft "${label}" saved` : 'Order held — resume it anytime from Held');
       setCart([]);
+      setSpecialInstructions(''); setShowInstructionsInput(false);
       setMobileCartOpen(false);
       setSelectedTableId(null);
       fetchHeldOrders();
@@ -751,7 +763,7 @@ export default function POSPage() {
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center flex-wrap gap-2">
             {/* Mobile-only cart toggle — desktop already shows the cart
                 permanently as a side panel, so this button doesn't exist
                 there at all (md:hidden) rather than being redundant. */}
@@ -974,7 +986,7 @@ export default function POSPage() {
             <Save size={14} /> <span className="hidden lg:inline">Save Draft</span>
           </button>
           <button
-            onClick={() => setCart([])}
+            onClick={() => { setCart([]); setSpecialInstructions(''); setShowInstructionsInput(false); }}
             className="btn-secondary flex-1 min-w-0 py-2.5 text-sm flex items-center justify-center gap-2 text-status-error border-status-error/20 hover:bg-status-error/5"
             title="Clear Cart"
           >
@@ -1107,9 +1119,27 @@ export default function POSPage() {
           )}
 
           {cart.length > 0 && !activeOrder && (
-            <button className="w-full text-left text-sm text-text-muted hover:text-brand transition-colors py-1 border-t border-border/50 pt-3">
-              ✏ Add special instructions
-            </button>
+            showInstructionsInput ? (
+              <div className="border-t border-border/50 pt-3 space-y-1.5">
+                <textarea
+                  value={specialInstructions}
+                  onChange={e => setSpecialInstructions(e.target.value)}
+                  onBlur={() => setShowInstructionsInput(false)}
+                  autoFocus
+                  rows={2}
+                  placeholder="e.g. no onions, extra spicy, allergy note…"
+                  className="input w-full text-sm resize-none"
+                />
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowInstructionsInput(true)}
+                className="w-full text-left text-sm text-text-muted hover:text-brand transition-colors py-1 border-t border-border/50 pt-3 flex items-center gap-1.5"
+              >
+                <Pencil size={13} />
+                {specialInstructions ? <span className="truncate text-text-secondary">{specialInstructions}</span> : 'Add special instructions'}
+              </button>
+            )
           )}
         </div>
 
@@ -1231,6 +1261,7 @@ export default function POSPage() {
                   toast.error('Could not cancel automatically — cancel it from the Orders page.');
                 }
                 setActiveOrder(null); setCart([]); setTenderAmount('');
+                setSpecialInstructions(''); setShowInstructionsInput(false);
                 setMobileCartOpen(false);
                 setSelectedCustomer(null); setSelectedTableId(null); clearCartDraft();
               }}

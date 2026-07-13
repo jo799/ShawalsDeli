@@ -19,6 +19,7 @@ export interface QueuedSale {
     customer_name: string;
     guests: number;
     items: Array<{ menu_item_id: string; item_name: string; quantity: number; unit_price: number }>;
+    special_instructions?: string;
     payment_method: 'cash' | 'card';
   };
   paymentPayload: {

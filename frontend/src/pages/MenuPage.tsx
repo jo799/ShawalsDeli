@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Search, Grid, List, Star, Edit2, Trash2, X, RotateCcw } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, cn, resolveMenuImage, menuImagePlaceholder } from '@/lib/utils';
-import { PageHeader, StatusBadge, Modal, LoadingPage } from '@/components/ui';
+import { PageHeader, StatusBadge, LoadingPage } from '@/components/ui';
 import toast from 'react-hot-toast';
 
 interface MenuItem {
@@ -40,7 +40,7 @@ export default function MenuPage() {
   const [total, setTotal] = useState(0);
   const LIMIT = 12;
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const [itemsRes, catRes] = await Promise.all([
@@ -65,10 +65,10 @@ export default function MenuPage() {
       setCategories(catRes.data.data);
     } catch { toast.error('Failed to load menu'); }
     finally { setLoading(false); }
-  };
+  }, [activeCategoryId, search, statusFilter, page]);
 
-  useEffect(() => { fetchData(); }, [activeCategoryId, page, statusFilter]);
-  useEffect(() => { const t = setTimeout(fetchData, 400); return () => clearTimeout(t); }, [search]);
+  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { const t = setTimeout(fetchData, 400); return () => clearTimeout(t); }, [search, fetchData]);
 
   const openEdit = (item?: MenuItem) => {
     if (item) {
