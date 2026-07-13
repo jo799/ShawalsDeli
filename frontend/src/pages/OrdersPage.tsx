@@ -138,7 +138,7 @@ export default function OrdersPage() {
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
       {/* Main list */}
-      <div className="flex-1 flex flex-col overflow-hidden p-6">
+      <div className="flex-1 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Orders" subtitle="Manage and track all restaurant orders">
           <button onClick={() => navigate('/pos')} className="btn-primary flex items-center gap-2"><Plus size={15} /> New Order</button>
         </PageHeader>

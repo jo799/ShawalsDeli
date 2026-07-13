@@ -199,7 +199,7 @@ export default function InventoryPage() {
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
       {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden p-6">
+      <div className="flex-1 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Inventory" subtitle="Track and manage your stock items in real-time">
           <button onClick={() => { if (selected) setShowAdjust(true); else toast.error('Select an item first'); }}
             className="btn-secondary flex items-center gap-2 text-sm">

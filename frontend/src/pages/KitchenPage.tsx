@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ChefHat, Volume2, VolumeX, Maximize2, RefreshCw, CheckCircle } from 'lucide-react';
+import { ChefHat, Volume2, VolumeX, Maximize2, RefreshCw, CheckCircle, ShoppingCart, Flame, CheckCheck, Timer } from 'lucide-react';
 import api from '@/lib/api';
 import { formatTime, toLocalDateString } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -315,31 +315,31 @@ export default function KitchenPage() {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-surface-300">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3 bg-surface-card border-b border-border">
-        <div className="flex items-center gap-3">
-          <ChefHat size={20} className="text-brand" />
-          <div>
-            <h1 className="font-bold text-text-primary">Kitchen Display</h1>
-            <p className="text-xs text-text-muted">Real-time kitchen order management</p>
+      <div className="flex items-center justify-between flex-wrap gap-2 px-3 sm:px-5 py-3 bg-surface-card border-b border-border">
+        <div className="flex items-center gap-3 min-w-0">
+          <ChefHat size={20} className="text-brand shrink-0" />
+          <div className="min-w-0">
+            <h1 className="font-bold text-text-primary truncate">Kitchen Display</h1>
+            <p className="hidden sm:block text-xs text-text-muted">Real-time kitchen order management</p>
           </div>
-          <div className="flex items-center gap-1 ml-2">
+          <div className="hidden sm:flex items-center gap-1 ml-2 shrink-0">
             <span className="w-2 h-2 rounded-full bg-status-success animate-pulse" />
             <span className="text-xs text-status-success">Live</span>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <p className={`text-xs ${fetchFailing ? 'text-status-error font-medium' : 'text-text-muted'}`}>
+        <div className="flex items-center gap-1.5 sm:gap-3 flex-wrap">
+          <p className={`hidden md:block text-xs ${fetchFailing ? 'text-status-error font-medium' : 'text-text-muted'}`}>
             {fetchFailing ? '⚠ Connection issue — showing last known data' : `Last updated: ${formatTime(lastUpdated)}`}
           </p>
-          <button onClick={fetchOrders} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5">
-            <RefreshCw size={12} /> Refresh
+          <button onClick={fetchOrders} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 px-2 sm:px-3">
+            <RefreshCw size={12} /> <span className="hidden sm:inline">Refresh</span>
           </button>
-          <button onClick={() => { setSoundUnlocked(true); setSoundEnabled(v => { const next = !v; if (next) playAlertTone(); return next; }); }} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5" title="Click to hear a test beep">
-            {soundEnabled ? <Volume2 size={12} /> : <VolumeX size={12} />} Sound {soundEnabled ? 'ON' : 'OFF'}
+          <button onClick={() => { setSoundUnlocked(true); setSoundEnabled(v => { const next = !v; if (next) playAlertTone(); return next; }); }} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 px-2 sm:px-3" title="Click to hear a test beep">
+            {soundEnabled ? <Volume2 size={12} /> : <VolumeX size={12} />} <span className="hidden sm:inline">Sound {soundEnabled ? 'ON' : 'OFF'}</span>
           </button>
           <button onClick={() => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); }}
-            className="btn-secondary flex items-center gap-1.5 text-xs py-1.5">
-            <Maximize2 size={12} /> Fullscreen
+            className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 px-2 sm:px-3">
+            <Maximize2 size={12} /> <span className="hidden sm:inline">Fullscreen</span>
           </button>
         </div>
       </div>
@@ -456,14 +456,14 @@ export default function KitchenPage() {
       {/* Bottom stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 border-t border-border bg-surface-card">
         {[
-          { icon: '🛒', label: 'New Orders', value: newOrders.length, sub: 'Total pending' },
-          { icon: '🍳', label: 'Preparing', value: preparingOrders.length, sub: 'In progress' },
-          { icon: '✅', label: 'Ready', value: readyOrders.length, sub: 'Ready to serve' },
-          { icon: '✓', label: 'Completed Today', value: completedToday, sub: 'Completed orders' },
-          { icon: '⏱', label: 'Avg. Prep Time', value: avgPrepTime, sub: 'Minutes' },
+          { Icon: ShoppingCart, label: 'New Orders', value: newOrders.length, sub: 'Total pending' },
+          { Icon: Flame, label: 'Preparing', value: preparingOrders.length, sub: 'In progress' },
+          { Icon: CheckCircle, label: 'Ready', value: readyOrders.length, sub: 'Ready to serve' },
+          { Icon: CheckCheck, label: 'Completed Today', value: completedToday, sub: 'Completed orders' },
+          { Icon: Timer, label: 'Avg. Prep Time', value: avgPrepTime, sub: 'Minutes' },
         ].map(stat => (
           <div key={stat.label} className="flex items-center gap-3 px-5 py-3 border-r border-border last:border-0">
-            <span className="text-xl">{stat.icon}</span>
+            <stat.Icon size={20} className="text-brand shrink-0" />
             <div>
               <p className="text-lg font-bold text-text-primary">{stat.value}</p>
               <p className="text-xs text-text-muted">{stat.sub}</p>

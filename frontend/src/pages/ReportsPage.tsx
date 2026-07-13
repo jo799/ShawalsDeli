@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Download, Printer } from 'lucide-react';
+import { RefreshCw, Download, Printer, DollarSign, ClipboardList, UtensilsCrossed, TrendingUp } from 'lucide-react';
 import { AreaChart, Area, PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format } from 'date-fns';
 import api from '@/lib/api';
@@ -157,14 +157,14 @@ export default function ReportsPage() {
               show regardless of what actually happened. */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             {[
-              { label: 'Total Sales', value: formatCurrency(data.summary.total_sales), icon: '💰', pct: data.comparison.total_sales_change_pct },
-              { label: 'Orders', value: data.summary.total_orders, icon: '📋', pct: data.comparison.total_orders_change_pct },
-              { label: 'Avg Order Value', value: formatCurrency(data.summary.avg_order_value), icon: '🍽', pct: data.comparison.avg_order_value_change_pct },
-              { label: 'Gross Profit', value: formatCurrency(data.summary.gross_profit), icon: '📈', pct: data.comparison.gross_profit_change_pct },
+              { label: 'Total Sales', value: formatCurrency(data.summary.total_sales), Icon: DollarSign, pct: data.comparison.total_sales_change_pct },
+              { label: 'Orders', value: data.summary.total_orders, Icon: ClipboardList, pct: data.comparison.total_orders_change_pct },
+              { label: 'Avg Order Value', value: formatCurrency(data.summary.avg_order_value), Icon: UtensilsCrossed, pct: data.comparison.avg_order_value_change_pct },
+              { label: 'Gross Profit', value: formatCurrency(data.summary.gross_profit), Icon: TrendingUp, pct: data.comparison.gross_profit_change_pct },
             ].map(card => (
               <div key={card.label} className="card p-4">
                 <div className="flex items-start justify-between mb-3">
-                  <div className="w-10 h-10 bg-brand/10 rounded-lg flex items-center justify-center text-lg">{card.icon}</div>
+                  <div className="w-10 h-10 bg-brand/10 rounded-lg flex items-center justify-center"><card.Icon size={18} className="text-brand" /></div>
                 </div>
                 <p className="text-xs text-text-muted mb-0.5">{card.label}</p>
                 <p className="text-xl font-bold text-text-primary">{card.value}</p>

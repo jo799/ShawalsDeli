@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Search, Star, Wallet, Settings2 } from 'lucide-react';
+import { RefreshCw, Search, Star, Wallet, Settings2, Coins, Gift, Users } from 'lucide-react';
 import api from '@/lib/api';
 import { formatDate, formatCurrency, getInitials } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
@@ -123,7 +123,7 @@ export default function LoyaltyPointsPage() {
 
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
-      <div className="flex-1 flex flex-col overflow-hidden p-6">
+      <div className="flex-1 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Loyalty Points" subtitle="Manage customer loyalty points — points convert directly to a KES value, redeemable like cash">
           <button onClick={refreshAll} className="btn-secondary flex items-center gap-1.5 text-sm"><RefreshCw size={13} /> Refresh</button>
         </PageHeader>
@@ -134,14 +134,14 @@ export default function LoyaltyPointsPage() {
             relationship to anything. */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
           {[
-            { label: 'Total Members', value: stats.total_members, icon: '⭐', sub: 'Active loyalty members' },
-            { label: 'Total Points Earned', value: `${stats.total_earned.toLocaleString()} pts`, icon: '💰', sub: 'All-time' },
-            { label: 'Total Points Redeemed', value: `${stats.total_redeemed.toLocaleString()} pts`, icon: '🎁', sub: 'All-time' },
-            { label: 'Active Members', value: stats.active_members_30d, icon: '👥', sub: 'Ordered in last 30 days' },
-            { label: 'Points Liability', value: formatCurrency(stats.points_liability_kes), icon: '💳', sub: `Outstanding value @ KES ${stats.point_value_kes}/pt` },
+            { label: 'Total Members', value: stats.total_members, Icon: Star, sub: 'Active loyalty members' },
+            { label: 'Total Points Earned', value: `${stats.total_earned.toLocaleString()} pts`, Icon: Coins, sub: 'All-time' },
+            { label: 'Total Points Redeemed', value: `${stats.total_redeemed.toLocaleString()} pts`, Icon: Gift, sub: 'All-time' },
+            { label: 'Active Members', value: stats.active_members_30d, Icon: Users, sub: 'Ordered in last 30 days' },
+            { label: 'Points Liability', value: formatCurrency(stats.points_liability_kes), Icon: Wallet, sub: `Outstanding value @ KES ${stats.point_value_kes}/pt` },
           ].map(s => (
             <div key={s.label} className="card p-3 flex items-start gap-2">
-              <span className="text-xl">{s.icon}</span>
+              <s.Icon size={18} className="text-brand shrink-0 mt-0.5" />
               <div>
                 <p className="text-lg font-bold text-text-primary">{s.value}</p>
                 <p className="text-xs text-text-muted">{s.label}</p>
@@ -175,7 +175,7 @@ export default function LoyaltyPointsPage() {
         <div className="card flex-1 flex flex-col overflow-hidden">
           <div className="overflow-auto flex-1">
             {loading ? <LoadingPage /> : (
-              <table className="w-full">
+              <table className="w-full min-w-[900px]">
                 <thead className="bg-surface-50 sticky top-0">
                   <tr>
                     {['Customer','Tier','Total Points','Available','Value (KES)','Earned (30d)','Last Visit','Status','Actions'].map(h => (
