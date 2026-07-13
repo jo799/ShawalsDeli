@@ -940,21 +940,21 @@ export default function POSPage() {
         )}
 
         {/* Bottom actions */}
-        <div className="flex items-center gap-2 pt-3 border-t border-border">
-          <button onClick={() => holdCurrentOrder()} className="btn-secondary flex-1 py-2.5 text-sm flex items-center justify-center gap-2" title="Hold Order">
+        <div className="flex items-center gap-1.5 sm:gap-2 pt-3 border-t border-border">
+          <button onClick={() => holdCurrentOrder()} className="btn-secondary flex-1 min-w-0 py-2.5 text-sm flex items-center justify-center gap-2" title="Hold Order">
             <Pause size={14} /> <span className="hidden lg:inline">Hold Order</span>
           </button>
-          <button onClick={saveDraft} className="btn-secondary flex-1 py-2.5 text-sm flex items-center justify-center gap-2" title="Save Draft">
+          <button onClick={saveDraft} className="btn-secondary flex-1 min-w-0 py-2.5 text-sm flex items-center justify-center gap-2" title="Save Draft">
             <Save size={14} /> <span className="hidden lg:inline">Save Draft</span>
           </button>
           <button
             onClick={() => setCart([])}
-            className="btn-secondary flex-1 py-2.5 text-sm flex items-center justify-center gap-2 text-status-error border-status-error/20 hover:bg-status-error/5"
+            className="btn-secondary flex-1 min-w-0 py-2.5 text-sm flex items-center justify-center gap-2 text-status-error border-status-error/20 hover:bg-status-error/5"
             title="Clear Cart"
           >
             <Trash2 size={14} /> <span className="hidden lg:inline">Clear Cart</span>
           </button>
-          <button className="btn-secondary py-2.5 px-4 text-sm flex items-center gap-2" title="Items">
+          <button className="btn-secondary py-2.5 px-2.5 sm:px-4 text-sm flex items-center gap-1.5 sm:gap-2 shrink-0" title="Items">
             <ShoppingCart size={14} /> <span className="hidden sm:inline">Items</span> ({itemCount})
           </button>
         </div>
