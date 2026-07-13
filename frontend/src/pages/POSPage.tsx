@@ -51,6 +51,13 @@ export default function POSPage() {
   const [activeOrderCount,  setActiveOrderCount]   = useState<number | null>(null);
   const [heldOrders,        setHeldOrders]         = useState<HeldOrder[]>([]);
   const [showHeldPanel,     setShowHeldPanel]      = useState(false);
+  // Mobile-only — below md: the cart used to always sit stacked under the
+  // menu grid, permanently eating half the screen height even when empty.
+  // This makes it a hidden-by-default slide-up drawer instead, opened via
+  // the cart icon in the top bar, so the menu gets the full screen until
+  // someone actually wants to see their cart. Desktop is untouched — it
+  // still shows the cart as a permanent side panel regardless of this.
+  const [mobileCartOpen,    setMobileCartOpen]      = useState(false);
 
   // ── Customer attachment + loyalty toggle ────────────────────────────────
   // Walk-in by default (selectedCustomer === null) — attaching a real
@@ -412,6 +419,7 @@ export default function POSPage() {
       );
       printReceipt(order.id);
       setCart([]);
+      setMobileCartOpen(false);
       setActiveOrder(null);
       setTenderAmount('');
       setSelectedCustomer(null);
@@ -483,6 +491,7 @@ export default function POSPage() {
       );
       toast.success(`Sale queued (${formatCurrency(total)}) — will sync automatically once back online`, { icon: '📥', duration: 5000 });
       setCart([]);
+      setMobileCartOpen(false);
       setActiveOrder(null);
       setTenderAmount('');
       setSelectedCustomer(null);
@@ -556,6 +565,7 @@ export default function POSPage() {
       toast.success('M-Pesa payment confirmed!');
       setTimeout(() => {
         setShowMpesaModal(false); setCart([]); setActiveOrder(null); setTenderAmount('');
+        setMobileCartOpen(false);
         setSelectedCustomer(null); clearCartDraft();
       }, 1500);
     }
@@ -666,6 +676,7 @@ export default function POSPage() {
       });
       toast.success(label ? `Draft "${label}" saved` : 'Order held — resume it anytime from Held');
       setCart([]);
+      setMobileCartOpen(false);
       setSelectedTableId(null);
       fetchHeldOrders();
     } catch {
@@ -741,6 +752,21 @@ export default function POSPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Mobile-only cart toggle — desktop already shows the cart
+                permanently as a side panel, so this button doesn't exist
+                there at all (md:hidden) rather than being redundant. */}
+            <button
+              onClick={e => { e.stopPropagation(); setMobileCartOpen(true); }}
+              className="md:hidden btn-secondary flex items-center gap-1.5 text-sm py-2 relative"
+              title="View cart"
+            >
+              <ShoppingCart size={15} />
+              {itemCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-status-error rounded-full text-[10px] font-bold flex items-center justify-center text-white">
+                  {itemCount > 99 ? '99+' : itemCount}
+                </span>
+              )}
+            </button>
             <button onClick={() => setShowScanModal(true)} className="btn-secondary flex items-center gap-1.5 text-sm py-2" title="Scan">
               <Scan size={15} /> <span className="hidden sm:inline">Scan</span>
             </button>
@@ -954,14 +980,33 @@ export default function POSPage() {
           >
             <Trash2 size={14} /> <span className="hidden lg:inline">Clear Cart</span>
           </button>
-          <button className="btn-secondary py-2.5 px-2.5 sm:px-4 text-sm flex items-center gap-1.5 sm:gap-2 shrink-0" title="Items">
+          <button onClick={() => setMobileCartOpen(true)} className="btn-secondary py-2.5 px-2.5 sm:px-4 text-sm flex items-center gap-1.5 sm:gap-2 shrink-0" title="View cart">
             <ShoppingCart size={14} /> <span className="hidden sm:inline">Items</span> ({itemCount})
           </button>
         </div>
       </div>
 
+      {/* Backdrop — mobile only, closes the drawer on tap-outside. Doesn't
+          exist in the DOM at all on desktop (rather than existing-but-hidden)
+          so it can never intercept a click on the permanent side panel. */}
+      {mobileCartOpen && (
+        <div className="fixed inset-0 bg-black/60 z-40 md:hidden" onClick={() => setMobileCartOpen(false)} />
+      )}
+
       {/* ══════════════ RIGHT — Cart ══════════════ */}
-      <div className="w-full md:w-[340px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col max-h-[50vh] md:max-h-none">
+      <div
+        className={`w-full md:w-[340px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col
+          max-h-[85vh] md:max-h-none
+          fixed inset-x-0 bottom-0 z-50 rounded-t-2xl md:rounded-none transition-transform duration-300 ease-in-out
+          md:static md:z-auto md:translate-y-0
+          ${mobileCartOpen ? 'translate-y-0' : 'translate-y-full'}`}
+      >
+        {/* Mobile-only drag handle + close, purely visual/functional cues
+            that this is a dismissible sheet — neither exists on desktop
+            where the panel is just permanently docked. */}
+        <div className="md:hidden flex justify-center pt-2 pb-1">
+          <span className="w-10 h-1 rounded-full bg-border" />
+        </div>
 
         {/* Table header */}
         <div className="px-5 py-4 border-b border-border flex items-center justify-between flex-wrap gap-2">
@@ -971,6 +1016,9 @@ export default function POSPage() {
               {orderType === 'Dine In' ? (selectedTable ? `Table ${selectedTable.table_number}` : 'Dine In — no table selected') : orderType}
             </span>
           </div>
+          <button onClick={() => setMobileCartOpen(false)} className="md:hidden btn-ghost p-1 shrink-0">
+            <X size={16} />
+          </button>
           {orderType === 'Dine In' && (
             <button onClick={() => setShowTablePicker(true)} className="text-sm text-brand font-medium hover:text-brand-400 shrink-0">
               {selectedTable ? 'Change' : 'Select table'}
@@ -1183,6 +1231,7 @@ export default function POSPage() {
                   toast.error('Could not cancel automatically — cancel it from the Orders page.');
                 }
                 setActiveOrder(null); setCart([]); setTenderAmount('');
+                setMobileCartOpen(false);
                 setSelectedCustomer(null); setSelectedTableId(null); clearCartDraft();
               }}
               className="w-full text-center text-xs text-status-error hover:underline pt-1"
