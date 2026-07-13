@@ -113,6 +113,14 @@ export default function MenuPage() {
         await api.post('/menu/items', formData);
         toast.success('Item added');
       }
+      // "Available" + stock tracking on + zero units is a real,
+      // easy-to-miss contradiction: the item looks fine in this list, but
+      // the POS will show it as out of stock and refuse to sell it. Worth
+      // a heads-up right when it's created rather than someone discovering
+      // it later wondering why toggling "Available" never seems to help.
+      if (formData.status === 'available' && formData.track_stock && Number(formData.stock_quantity) <= 0) {
+        toast(`${formData.name} is marked available but has 0 units tracked — it'll show as out of stock in POS until you add stock or turn off tracking.`, { icon: '⚠️', duration: 6000 });
+      }
       setEditing(false);
       fetchData();
     } catch { toast.error('Failed to save item'); }
