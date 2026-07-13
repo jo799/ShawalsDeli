@@ -123,7 +123,7 @@ export default function LoyaltyPointsPage() {
 
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
-      <div className="flex-1 flex flex-col overflow-y-auto md:overflow-hidden p-6">
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Loyalty Points" subtitle="Manage customer loyalty points — points convert directly to a KES value, redeemable like cash">
           <button onClick={refreshAll} className="btn-secondary flex items-center gap-1.5 text-sm"><RefreshCw size={13} /> Refresh</button>
         </PageHeader>

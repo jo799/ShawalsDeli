@@ -253,7 +253,7 @@ export default function TablesPage() {
 
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
-      <div className="flex-1 flex flex-col overflow-y-auto md:overflow-hidden p-6">
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Tables" subtitle="View and manage all restaurant tables">
           <button onClick={() => setView('floor')} className="btn-secondary flex items-center gap-2 text-sm">
             <LayoutGrid size={14} /> Table Layout

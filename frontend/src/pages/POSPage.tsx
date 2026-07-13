@@ -827,7 +827,7 @@ export default function POSPage() {
               <button
                 onClick={() => { if (orderType === 'Dine In') { setShowTablePicker(p => !p); setShowTypePicker(false); setShowHeldPanel(false); } }}
                 disabled={orderType !== 'Dine In'}
-                className="btn-secondary flex items-center gap-1.5 text-sm py-2 font-bold text-brand disabled:opacity-40 disabled:cursor-not-allowed"
+                className="btn-secondary flex items-center gap-1.5 text-sm py-2 font-bold text-brand disabled:opacity-40 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
               >
                 {orderType === 'Dine In' ? (selectedTable ? selectedTable.table_number : 'Select Table') : orderType}
                 {orderType === 'Dine In' && <ChevronDown size={13} />}
@@ -860,7 +860,7 @@ export default function POSPage() {
             <div className="relative" onClick={e => e.stopPropagation()}>
               <button
                 onClick={() => { setShowTypePicker(p => !p); setShowTablePicker(false); setShowHeldPanel(false); }}
-                className="btn-secondary flex items-center gap-1.5 text-sm py-2"
+                className="btn-secondary flex items-center gap-1.5 text-sm py-2 shrink-0 whitespace-nowrap"
               >
                 <ShoppingCart size={13} /> {orderType} <ChevronDown size={13} />
               </button>

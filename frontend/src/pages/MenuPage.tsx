@@ -186,7 +186,7 @@ export default function MenuPage() {
 
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
-      <div className="flex-1 flex flex-col overflow-y-auto md:overflow-hidden p-6">
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Menu" subtitle="Manage your menu items, categories and modifiers">
           <button className="btn-secondary text-sm">Categories</button>
           <button className="btn-secondary text-sm">Modifiers</button>
