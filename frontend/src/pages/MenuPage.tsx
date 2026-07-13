@@ -22,6 +22,9 @@ const EMPTY_ITEM = {
 export default function MenuPage() {
   const [items, setItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [showNewCategory, setShowNewCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [savingCategory, setSavingCategory] = useState(false);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null); // null = "All Items"
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [search, setSearch] = useState('');
@@ -82,6 +85,22 @@ export default function MenuPage() {
       setSelected(null);
     }
     setEditing(true);
+  };
+
+  const createCategory = async () => {
+    if (!newCategoryName.trim()) { toast.error('Enter a category name'); return; }
+    setSavingCategory(true);
+    try {
+      const { data } = await api.post('/menu/categories', { name: newCategoryName.trim() });
+      setCategories(prev => [...prev, data.data]);
+      setFormData(p => ({ ...p, category_id: data.data.id }));
+      setShowNewCategory(false);
+      setNewCategoryName('');
+      toast.success('Category added');
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to add category';
+      toast.error(msg);
+    } finally { setSavingCategory(false); }
   };
 
   const saveItem = async () => {
@@ -343,10 +362,33 @@ export default function MenuPage() {
 
             <div>
               <label className="block text-xs font-medium text-text-secondary mb-1">Category *</label>
-              <select value={formData.category_id} onChange={e => setFormData(p => ({...p, category_id: e.target.value}))} className="select">
-                <option value="">Select category</option>
-                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              {showNewCategory ? (
+                <div className="flex gap-1.5">
+                  <input
+                    value={newCategoryName}
+                    onChange={e => setNewCategoryName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); createCategory(); } }}
+                    className="input flex-1" placeholder="New category name" autoFocus
+                  />
+                  <button type="button" onClick={createCategory} disabled={savingCategory} className="btn-primary px-3 text-sm disabled:opacity-50">
+                    {savingCategory ? '...' : 'Add'}
+                  </button>
+                  <button type="button" onClick={() => { setShowNewCategory(false); setNewCategoryName(''); }} className="btn-ghost px-2"><X size={14} /></button>
+                </div>
+              ) : (
+                <select
+                  value={formData.category_id}
+                  onChange={e => {
+                    if (e.target.value === '__new__') { setShowNewCategory(true); return; }
+                    setFormData(p => ({ ...p, category_id: e.target.value }));
+                  }}
+                  className="select"
+                >
+                  <option value="">Select category</option>
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  <option value="__new__">+ New Category…</option>
+                </select>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
