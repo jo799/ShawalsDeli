@@ -250,8 +250,9 @@ export const transferTable = async (req: AuthRequest, res: Response): Promise<vo
     const sourceRow = await client.query(
       `SELECT t.*, o.id AS order_id, o.order_number, o.status AS order_status
        FROM restaurant_tables t
-       LEFT JOIN orders o ON o.id = t.current_order_id
-       WHERE t.id = $1 AND t.is_active = true FOR UPDATE`,
+       INNER JOIN orders o ON o.id = t.current_order_id
+       WHERE t.id = $1 AND t.is_active = true
+       FOR UPDATE OF t, o`,
       [id]
     );
     if (sourceRow.rows.length === 0) {
@@ -354,8 +355,9 @@ export const mergeTables = async (req: AuthRequest, res: Response): Promise<void
     const primaryRow = await client.query(
       `SELECT t.*, o.id AS order_id, o.order_number, o.status AS order_status, o.guests
        FROM restaurant_tables t
-       JOIN orders o ON o.id = t.current_order_id
-       WHERE t.id = $1 AND t.is_active = true FOR UPDATE`,
+       INNER JOIN orders o ON o.id = t.current_order_id
+       WHERE t.id = $1 AND t.is_active = true
+       FOR UPDATE OF t, o`,
       [id]
     );
     if (primaryRow.rows.length === 0) {
@@ -378,8 +380,9 @@ export const mergeTables = async (req: AuthRequest, res: Response): Promise<void
     const secondaryRow = await client.query(
       `SELECT t.*, o.id AS order_id, o.order_number, o.status AS order_status, o.guests
        FROM restaurant_tables t
-       JOIN orders o ON o.id = t.current_order_id
-       WHERE t.id = $1 AND t.is_active = true FOR UPDATE`,
+       INNER JOIN orders o ON o.id = t.current_order_id
+       WHERE t.id = $1 AND t.is_active = true
+       FOR UPDATE OF t, o`,
       [other_table_id]
     );
     if (secondaryRow.rows.length === 0) {
