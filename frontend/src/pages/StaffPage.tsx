@@ -186,7 +186,7 @@ export default function StaffPage() {
 
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
-      <div className="flex-1 flex flex-col overflow-hidden p-6">
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Staff" subtitle="Manage your team members, roles and permissions">
           <button onClick={openAdd} className="btn-primary flex items-center gap-2 text-sm">
             <Plus size={14} /> Add Staff

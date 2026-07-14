@@ -159,7 +159,7 @@ export default function CustomersPage() {
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
       {/* Main list */}
-      <div className="flex-1 flex flex-col overflow-hidden p-6">
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Customers" subtitle="View and manage customer information">
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />

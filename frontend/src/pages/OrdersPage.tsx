@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Filter, Eye } from 'lucide-react';
 import api from '@/lib/api';
+import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, formatTime } from '@/lib/utils';
 import { PageHeader, StatusBadge, Pagination } from '@/components/ui';
 import Receipt from '@/components/Receipt';
@@ -50,7 +51,7 @@ export default function OrdersPage() {
   const [refundRestock, setRefundRestock] = useState(false);
   const [refunding, setRefunding] = useState(false);
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
       const status = statusMap[activeTab];
@@ -61,10 +62,10 @@ export default function OrdersPage() {
       setPagination({ total: data.pagination.total, pages: data.pagination.pages });
     } catch { toast.error('Failed to load orders'); }
     finally { setLoading(false); }
-  };
+  }, [activeTab, search, page]);
 
-  useEffect(() => { fetchOrders(); }, [activeTab, page]);
-  useEffect(() => { const t = setTimeout(fetchOrders, 400); return () => clearTimeout(t); }, [search]);
+  useEffect(() => { fetchOrders(); }, [activeTab, page, fetchOrders]);
+  useEffect(() => { const t = setTimeout(fetchOrders, 400); return () => clearTimeout(t); }, [search, fetchOrders]);
 
   const printReceipt = async (orderId: string) => {
     try {
@@ -90,6 +91,18 @@ export default function OrdersPage() {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update order';
       toast.error(msg);
     }
+  };
+
+  // Previously the only way forward for an order stuck with an unpaid
+  // balance was the "Refund" button — but that's disabled whenever nothing
+  // has been paid yet at all, since there's nothing to refund. That left
+  // genuinely no way to clear an order the customer walked out on, despite
+  // the backend's own error message explicitly suggesting "cancel the order"
+  // as the way out. This calls the same status-update endpoint the backend
+  // already supports for cancellation — it was only ever missing a button.
+  const cancelOrder = (order: Order) => {
+    if (!confirmDelete(`Cancel order #${order.order_number}? This can't be undone.`)) return;
+    updateStatus(order.id, 'cancelled');
   };
 
   const openRefund = () => {
@@ -125,7 +138,7 @@ export default function OrdersPage() {
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
       {/* Main list */}
-      <div className="flex-1 flex flex-col overflow-hidden p-6">
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Orders" subtitle="Manage and track all restaurant orders">
           <button onClick={() => navigate('/pos')} className="btn-primary flex items-center gap-2"><Plus size={15} /> New Order</button>
         </PageHeader>
@@ -257,6 +270,9 @@ export default function OrdersPage() {
               )}
               {selected.status === 'ready' && (
                 <button onClick={() => updateStatus(selected.id, 'completed')} className="btn-primary w-full py-2 text-sm">Mark as Completed</button>
+              )}
+              {!['completed', 'cancelled'].includes(selected.status) && (
+                <button onClick={() => cancelOrder(selected)} className="btn-secondary w-full py-2 text-sm text-status-error">Cancel Order</button>
               )}
               <div className={`grid ${canRefund ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
                 <button onClick={() => printReceipt(selected.id)} className="btn-secondary text-xs py-2">🖨 Print Receipt</button>

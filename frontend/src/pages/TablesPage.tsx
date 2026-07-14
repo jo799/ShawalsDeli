@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, RefreshCw, LayoutGrid, List } from 'lucide-react';
+import { Plus, RefreshCw, LayoutGrid, List, Armchair, Circle, ShoppingCart, ArrowLeftRight, Receipt, Merge, Printer, X, Eye } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency } from '@/lib/utils';
@@ -88,7 +88,7 @@ export default function TablesPage() {
   // upcoming confirmed/seated reservation regardless of date).
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const [tablesRes, resRes] = await Promise.all([
@@ -107,9 +107,9 @@ export default function TablesPage() {
       setReservations(resRes.data.data);
     } catch { toast.error('Failed to load tables'); }
     finally { setLoading(false); }
-  };
+  }, [showAllUpcoming]);
 
-  useEffect(() => { fetchData(); }, [showAllUpcoming]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   // Manual override — the system otherwise only learns a table is free when
   // staff completes (or cancels) its order (see ordersController). This is
@@ -253,9 +253,9 @@ export default function TablesPage() {
 
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
-      <div className="flex-1 flex flex-col overflow-hidden p-6">
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Tables" subtitle="View and manage all restaurant tables">
-          <button className="btn-secondary flex items-center gap-2 text-sm">
+          <button onClick={() => setView('floor')} className="btn-secondary flex items-center gap-2 text-sm">
             <LayoutGrid size={14} /> Table Layout
           </button>
           <button onClick={openAddTable} className="btn-secondary flex items-center gap-2 text-sm">
@@ -269,14 +269,14 @@ export default function TablesPage() {
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
           {[
-            { label: 'Total Tables', value: stats.total, icon: '🪑', color: 'text-text-primary' },
-            { label: 'Occupied', value: stats.occupied, icon: '🔴', color: 'text-status-error' },
-            { label: 'Available', value: stats.available, icon: '🟢', color: 'text-status-success' },
-            { label: 'Reserved', value: stats.reserved, icon: '🟡', color: 'text-status-warning' },
-            { label: 'Cleaning', value: stats.cleaning, icon: '🟣', color: 'text-status-purple' },
+            { label: 'Total Tables', value: stats.total, Icon: Armchair, filled: false, color: 'text-text-primary' },
+            { label: 'Occupied', value: stats.occupied, Icon: Circle, filled: true, color: 'text-status-error' },
+            { label: 'Available', value: stats.available, Icon: Circle, filled: true, color: 'text-status-success' },
+            { label: 'Reserved', value: stats.reserved, Icon: Circle, filled: true, color: 'text-status-warning' },
+            { label: 'Cleaning', value: stats.cleaning, Icon: Circle, filled: true, color: 'text-status-purple' },
           ].map(s => (
             <div key={s.label} className="card p-3 text-center">
-              <p className="text-xl mb-1">{s.icon}</p>
+              <div className="flex justify-center mb-1"><s.Icon size={s.filled ? 14 : 20} className={s.color} fill={s.filled ? 'currentColor' : 'none'} /></div>
               <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
               <p className="text-xs text-text-muted">{s.label}</p>
               {s.label !== 'Total Tables' && (
@@ -480,12 +480,12 @@ export default function TablesPage() {
               <p className="text-xs text-text-muted mb-2">Table Actions</p>
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { icon: '🛒', label: 'Add Order', onClick: () => navigate('/pos') },
-                  { icon: '⇄', label: 'Transfer', onClick: () => toast('Transferring a table isn\'t built yet — coming in a future update.', { icon: 'ℹ️' }) },
-                  { icon: '📋', label: 'Split Bill', onClick: () => navigate('/pos') }, // Split Bill lives in the POS checkout flow
-                  { icon: '⊞', label: 'Merge Table', onClick: () => toast('Merging tables isn\'t built yet — coming in a future update.', { icon: 'ℹ️' }) },
-                  { icon: '🖨', label: 'Print Bill', onClick: () => toast('Print this from the Orders page once the order is selected.', { icon: 'ℹ️' }) },
-                  { icon: '✕', label: 'Close Table', danger: true, onClick: () => closeTable(selected) },
+                  { Icon: ShoppingCart, label: 'Add Order', onClick: () => navigate('/pos') },
+                  { Icon: ArrowLeftRight, label: 'Transfer', onClick: () => toast('Transferring a table isn\'t built yet — coming in a future update.', { icon: 'ℹ️' }) },
+                  { Icon: Receipt, label: 'Split Bill', onClick: () => navigate('/pos') }, // Split Bill lives in the POS checkout flow
+                  { Icon: Merge, label: 'Merge Table', onClick: () => toast('Merging tables isn\'t built yet — coming in a future update.', { icon: 'ℹ️' }) },
+                  { Icon: Printer, label: 'Print Bill', onClick: () => toast('Print this from the Orders page once the order is selected.', { icon: 'ℹ️' }) },
+                  { Icon: X, label: 'Close Table', danger: true, onClick: () => closeTable(selected) },
                 ].map(action => (
                   <button key={action.label}
                     onClick={action.onClick}
@@ -495,7 +495,7 @@ export default function TablesPage() {
                         : 'border-border text-text-secondary hover:border-brand/40 hover:text-brand hover:bg-brand/5'
                       }`}
                   >
-                    <span>{action.icon}</span>
+                    <action.Icon size={16} />
                     <span>{action.label}</span>
                   </button>
                 ))}
@@ -504,7 +504,7 @@ export default function TablesPage() {
 
             {selected.current_order_id && (
               <button className="btn-secondary w-full text-sm flex items-center justify-center gap-2">
-                👁 View Order
+                <Eye size={14} /> View Order
               </button>
             )}
           </div>

@@ -1,6 +1,6 @@
 // ─── Expenses Page ────────────────────────────────────────────────────────────
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Download, X, Edit2, Trash2, Upload, FileText } from 'lucide-react';
+import { Plus, Download, X, Edit2, Trash2, Upload, FileText, CreditCard, TrendingUp, Calendar, AlertTriangle } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, formatDate, toLocalDateString } from '@/lib/utils';
@@ -168,7 +168,7 @@ export function ExpensesPage() {
 
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
-      <div className="flex-1 flex flex-col overflow-hidden p-6">
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Expenses" subtitle="Track and manage business expenses">
           <button onClick={exportCsv} disabled={expenses.length === 0} className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50"><Download size={13} /> Export</button>
           {canManage && <button onClick={openAdd} className="btn-primary flex items-center gap-2 text-sm"><Plus size={14} /> Add Expense</button>}
@@ -182,21 +182,21 @@ export function ExpensesPage() {
             existed on expense_categories — nothing was ever reading it. */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
           {[
-            { label: 'Total Expenses', value: formatCurrency(summary.total), icon: '💳', sub: `${summary.count} transactions` },
+            { label: 'Total Expenses', value: formatCurrency(summary.total), Icon: CreditCard, sub: `${summary.count} transactions` },
             {
-              label: 'This Month', value: formatCurrency(stats?.this_month_total || 0), icon: '📈',
+              label: 'This Month', value: formatCurrency(stats?.this_month_total || 0), Icon: TrendingUp,
               sub: stats?.this_month_change_pct === null ? '— vs last month' : `${(stats?.this_month_change_pct || 0) >= 0 ? '+' : ''}${stats?.this_month_change_pct}% vs last month`,
               subColor: stats?.this_month_change_pct !== null && (stats?.this_month_change_pct || 0) <= 0 ? 'text-status-success' : 'text-status-error',
             },
-            { label: 'Average per Day', value: formatCurrency(stats?.average_per_day || 0), icon: '📅', sub: 'This month' },
+            { label: 'Average per Day', value: formatCurrency(stats?.average_per_day || 0), Icon: Calendar, sub: 'This month' },
             {
-              label: 'Over Budget', value: `${stats?.over_budget_categories.length || 0} ${stats?.over_budget_categories.length === 1 ? 'Category' : 'Categories'}`, icon: '⚠',
+              label: 'Over Budget', value: `${stats?.over_budget_categories.length || 0} ${stats?.over_budget_categories.length === 1 ? 'Category' : 'Categories'}`, Icon: AlertTriangle,
               sub: stats?.over_budget_categories.length ? stats.over_budget_categories.map(c => c.name).join(', ') : 'None this month',
               color: stats?.over_budget_categories.length ? 'text-status-error' : undefined,
             },
           ].map(s => (
             <div key={s.label} className="card p-3">
-              <div className="flex items-center gap-2 mb-2"><span className="text-lg">{s.icon}</span></div>
+              <div className="flex items-center gap-2 mb-2"><s.Icon size={18} className="text-brand" /></div>
               <p className={`text-base font-bold ${s.color || 'text-text-primary'}`}>{s.value}</p>
               <p className="text-xs text-text-muted">{s.label}</p>
               {s.sub && <p className={`text-xs mt-0.5 truncate ${(s as { subColor?: string }).subColor || 'text-text-muted'}`}>{s.sub}</p>}

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   ShoppingCart, ClipboardList, Users, TrendingUp,
   Package, AlertTriangle, ArrowUpRight, ArrowDownRight,
-  DollarSign, ChefHat, Star
+  DollarSign, ChefHat, Star, Ban
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip,
@@ -34,6 +34,7 @@ interface DashStats {
   today_orders: number;
   active_customers: number;
   low_stock_items: number;
+  unavailable_menu_items: number;
   pending_orders: number;
   avg_order_value: number;
 }
@@ -46,7 +47,7 @@ interface RecentOrder {
 
 export default function DashboardPage() {
   const isOnline = useOnlineStatus();
-  const [stats, setStats] = useState<DashStats>({ today_sales: 0, today_orders: 0, active_customers: 0, low_stock_items: 0, pending_orders: 0, avg_order_value: 0 });
+  const [stats, setStats] = useState<DashStats>({ today_sales: 0, today_orders: 0, active_customers: 0, low_stock_items: 0, unavailable_menu_items: 0, pending_orders: 0, avg_order_value: 0 });
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [salesData, setSalesData] = useState<Array<{hour: string; Sales: number; Orders: number}>>([]);
   const [categoryData, setCategoryData] = useState<Array<{name: string; value: number}>>([]);
@@ -56,11 +57,12 @@ export default function DashboardPage() {
     const load = async () => {
       try {
         const today = toLocalDateString();
-        const [reportRes, ordersRes, inventoryRes, customersRes] = await Promise.all([
+        const [reportRes, ordersRes, inventoryRes, customersRes, unavailableRes] = await Promise.all([
           api.get('/reports/daily', { params: { date: today } }).catch(() => ({ data: { data: null } })),
           api.get('/orders', { params: { limit: 6 } }).catch(() => ({ data: { data: [] } })),
           api.get('/inventory').catch(() => ({ data: { stats: { low_stock: 0 } } })),
           api.get('/customers', { params: { limit: 1, status: 'active' } }).catch(() => ({ data: { pagination: { total: 0 } } })),
+          api.get('/menu/items', { params: { limit: 1, status: 'unavailable,out_of_stock' } }).catch(() => ({ data: { pagination: { total: 0 } } })),
         ]);
 
         const rep = reportRes.data.data;
@@ -70,6 +72,7 @@ export default function DashboardPage() {
             today_orders: rep.summary?.total_orders || 0,
             active_customers: customersRes.data.pagination?.total || 0,
             low_stock_items: inventoryRes.data.stats?.low_stock || 0,
+            unavailable_menu_items: unavailableRes.data.pagination?.total || 0,
             pending_orders: ordersRes.data.data?.filter((o: RecentOrder) => ['new','preparing'].includes(o.status)).length || 0,
             avg_order_value: rep.summary?.avg_order_value || 0,
           });
@@ -97,6 +100,7 @@ export default function DashboardPage() {
     { label: 'Avg Order Value', value: formatCurrency(stats.avg_order_value), icon: TrendingUp, iconBg: 'bg-status-purple/10', iconColor: 'text-status-purple', trend: +8, trendLabel: 'vs yesterday', positive: true },
     { label: 'Pending Orders', value: stats.pending_orders, icon: ChefHat, iconBg: 'bg-status-warning/10', iconColor: 'text-status-warning', trend: 0, trendLabel: 'right now', positive: true },
     { label: 'Low Stock Items', value: stats.low_stock_items, icon: AlertTriangle, iconBg: 'bg-status-error/10', iconColor: 'text-status-error', trend: stats.low_stock_items, trendLabel: 'need restocking', positive: false },
+    { label: 'Unavailable Items', value: stats.unavailable_menu_items, icon: Ban, iconBg: 'bg-status-error/10', iconColor: 'text-status-error', trend: stats.unavailable_menu_items, trendLabel: 'marked off menu', positive: false },
   ];
 
   const quickActions = [
@@ -127,7 +131,7 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-6">
         {kpis.map(kpi => (
           <div key={kpi.label} className="card p-4">
             <div className={`w-10 h-10 rounded-xl ${kpi.iconBg} flex items-center justify-center mb-3`}>

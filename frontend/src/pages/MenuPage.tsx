@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Search, Grid, List, Star, Edit2, Trash2, X, RotateCcw } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, cn, resolveMenuImage, menuImagePlaceholder } from '@/lib/utils';
-import { PageHeader, StatusBadge, Modal, LoadingPage } from '@/components/ui';
+import { PageHeader, StatusBadge, LoadingPage } from '@/components/ui';
 import toast from 'react-hot-toast';
 
 interface MenuItem {
@@ -40,7 +40,7 @@ export default function MenuPage() {
   const [total, setTotal] = useState(0);
   const LIMIT = 12;
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const [itemsRes, catRes] = await Promise.all([
@@ -65,10 +65,10 @@ export default function MenuPage() {
       setCategories(catRes.data.data);
     } catch { toast.error('Failed to load menu'); }
     finally { setLoading(false); }
-  };
+  }, [activeCategoryId, search, statusFilter, page]);
 
-  useEffect(() => { fetchData(); }, [activeCategoryId, page, statusFilter]);
-  useEffect(() => { const t = setTimeout(fetchData, 400); return () => clearTimeout(t); }, [search]);
+  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { const t = setTimeout(fetchData, 400); return () => clearTimeout(t); }, [search, fetchData]);
 
   const openEdit = (item?: MenuItem) => {
     if (item) {
@@ -112,6 +112,14 @@ export default function MenuPage() {
       } else {
         await api.post('/menu/items', formData);
         toast.success('Item added');
+      }
+      // "Available" + stock tracking on + zero units is a real,
+      // easy-to-miss contradiction: the item looks fine in this list, but
+      // the POS will show it as out of stock and refuse to sell it. Worth
+      // a heads-up right when it's created rather than someone discovering
+      // it later wondering why toggling "Available" never seems to help.
+      if (formData.status === 'available' && formData.track_stock && Number(formData.stock_quantity) <= 0) {
+        toast(`${formData.name} is marked available but has 0 units tracked — it'll show as out of stock in POS until you add stock or turn off tracking.`, { icon: '⚠️', duration: 6000 });
       }
       setEditing(false);
       fetchData();
@@ -178,7 +186,7 @@ export default function MenuPage() {
 
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
-      <div className="flex-1 flex flex-col overflow-hidden p-6">
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Menu" subtitle="Manage your menu items, categories and modifiers">
           <button className="btn-secondary text-sm">Categories</button>
           <button className="btn-secondary text-sm">Modifiers</button>

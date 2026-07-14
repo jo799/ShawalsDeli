@@ -362,7 +362,21 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    row-gap: 0.75rem;
     margin-bottom: 1.5rem;
+  }
+
+  /* Pages like Scheduling and Reports call window.print() directly on
+     whatever's currently on screen, with no printable-area wrapping the
+     way Receipt/PurchaseOrderDocument have — without this, the browser
+     prints the entire visible page, sidebar and mobile header included.
+     Hiding both here, globally, fixes this for every such page at once
+     rather than needing per-page print handling. */
+  @media print {
+    aside, header {
+      display: none !important;
+    }
   }
 
   /* ── POS-specific overrides ──────────────────────────────── */
@@ -382,22 +396,15 @@
     color: #000;
     font-weight: 700;
     width: 100%;
-    max-width: 100%;
-    min-width: 0;
-    box-sizing: border-box;
-    padding: 0.875rem 0.75rem;
+    padding: 0.875rem 0;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    font-size: 0.875rem;
+    font-size: 1rem;
     letter-spacing: 0.01em;
     border-radius: 0.5rem;
     transition: color 0.15s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  @media (min-width: 640px) {
-    .pos-checkout-btn { font-size: 1rem; padding-left: 0; padding-right: 0; }
   }
 
   .pos-checkout-btn:hover { background-color: rgb(var(--color-brand-400)); }

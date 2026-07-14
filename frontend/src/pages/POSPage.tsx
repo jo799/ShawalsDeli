@@ -1,21 +1,20 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search, Scan, ShoppingCart, X, Plus, Minus,
   Trash2, ChevronDown, Phone, CheckCircle, AlertCircle, Loader,
-  Pause, Save, Banknote, Smartphone, CreditCard, Shuffle, User, Star
+  Pause, Save, Banknote, Smartphone, CreditCard, Shuffle, User, Star, Pencil
 } from 'lucide-react';
 import api from '@/lib/api';
 import { enqueueSale } from '@/lib/offlineSync/queue';
 import { saveCartDraft, loadCartDraft, clearCartDraft } from '@/lib/posCartPersistence';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
-import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, resolveMenuImage, menuImagePlaceholder } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import Receipt from '@/components/Receipt';
 
-interface MenuItem  { id: string; name: string; price: number; category_name: string; image_url?: string; tags?: string[]; track_stock?: boolean; stock_quantity?: number; reorder_level?: number; }
+interface MenuItem  { id: string; name: string; price: number; category_name: string; image_url?: string; tags?: string[]; track_stock?: boolean; stock_quantity?: number; reorder_level?: number; status?: string; }
 interface CartItem  extends MenuItem { quantity: number; }
 interface Category  { id: string; name: string; item_count: number; }
 interface RestaurantTable { id: string; table_number: string; status: string; capacity?: number; area?: string; }
@@ -52,6 +51,13 @@ export default function POSPage() {
   const [activeOrderCount,  setActiveOrderCount]   = useState<number | null>(null);
   const [heldOrders,        setHeldOrders]         = useState<HeldOrder[]>([]);
   const [showHeldPanel,     setShowHeldPanel]      = useState(false);
+  // Mobile-only — below md: the cart used to always sit stacked under the
+  // menu grid, permanently eating half the screen height even when empty.
+  // This makes it a hidden-by-default slide-up drawer instead, opened via
+  // the cart icon in the top bar, so the menu gets the full screen until
+  // someone actually wants to see their cart. Desktop is untouched — it
+  // still shows the cart as a permanent side panel regardless of this.
+  const [mobileCartOpen,    setMobileCartOpen]      = useState(false);
 
   // ── Customer attachment + loyalty toggle ────────────────────────────────
   // Walk-in by default (selectedCustomer === null) — attaching a real
@@ -61,6 +67,12 @@ export default function POSPage() {
   // necessarily wanting to earn points on this particular sale (e.g. a
   // staff discount).
   const [selectedCustomer, setSelectedCustomer] = useState<{ id: string; full_name: string; phone?: string; available_points?: number } | null>(() => cartDraft?.selectedCustomer ?? null);
+  // "Add special instructions" used to be a dead button with no onClick at
+  // all — the backend already has a real special_instructions column on
+  // orders (and on order_items, for per-item notes), so this was only ever
+  // missing the frontend wiring, not a backend gap.
+  const [specialInstructions, setSpecialInstructions] = useState('');
+  const [showInstructionsInput, setShowInstructionsInput] = useState(false);
   const [awardLoyalty, setAwardLoyalty] = useState(true);
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   // Scan — a real USB barcode scanner behaves as a keyboard: it "types" the
@@ -84,8 +96,6 @@ export default function POSPage() {
   // since it's the one method that always has to work.
   const [posConfig, setPosConfig] = useState({ defaultMethod: 'Cash', enableMpesa: true, enableCard: true, enablePointsRedemption: true });
   const isOnline = useOnlineStatus();
-  const { isMobile } = useBreakpoint();
-  const [showMobileCart, setShowMobileCart] = useState(false);
   const [pointsToRedeem, setPointsToRedeem] = useState('');
 
   // ── Multi-tender payment state ─────────────────────────────────────────
@@ -133,10 +143,14 @@ export default function POSPage() {
         setLoadingMenu(true);
         const [catRes, itemRes] = await Promise.all([
           api.get('/menu/categories'),
-          // Explicitly available-only — the POS should never show an item
-          // a manager marked unavailable/archived just because the default
-          // listing happened to include it.
-          api.get('/menu/items?limit=100&status=available'),
+          // available + unavailable + out_of_stock (everything except
+          // archived) — items a manager or chef has temporarily marked off
+          // (e.g. an uninventoried dish like pilau that's run out for the
+          // day) still need to be visible here so staff know it exists and
+          // can tell a customer "not today" — see the disabled-card
+          // rendering below. Only genuinely archived/discontinued items are
+          // excluded entirely.
+          api.get('/menu/items?limit=100&status=available,unavailable,out_of_stock'),
         ]);
         setCategories(catRes.data.data);
         setItems(itemRes.data.data);
@@ -190,10 +204,6 @@ export default function POSPage() {
   }, []);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
-
-  useEffect(() => {
-    if (!isMobile) setShowMobileCart(false);
-  }, [isMobile]);
   useEffect(() => { api.get('/loyalty/stats').then(r => setPointValueKes(r.data.data.point_value_kes)).catch(() => {}); }, []);
 
   // Persists the in-progress sale so a refresh or navigating away and back
@@ -317,13 +327,13 @@ export default function POSPage() {
   // needs an actual call to Safaricom (there's no way to queue that), and
   // Split Bill / Points both need a live, current balance to check against
   // rather than a possibly-stale local number.
-  const availableMethods = [
+  const availableMethods = useMemo(() => [
     'Cash',
     ...(posConfig.enableMpesa && isOnline ? ['M-Pesa'] : []),
     ...(posConfig.enableCard ? ['Card'] : []),
     ...(isOnline ? ['Split Bill'] : []),
     ...(posConfig.enablePointsRedemption && isOnline && (selectedCustomer?.available_points || 0) > 0 ? ['Points'] : []),
-  ];
+  ], [posConfig.enableMpesa, posConfig.enableCard, posConfig.enablePointsRedemption, isOnline, selectedCustomer?.available_points]);
   const maxPointsUsable = Math.min(
     selectedCustomer?.available_points || 0,
     pointValueKes > 0 ? Math.floor(balanceDueDisplay / pointValueKes) : 0
@@ -356,6 +366,7 @@ export default function POSPage() {
       customer_name: selectedCustomer?.full_name || 'Walk-in Customer',
       guests: 1,
       items: cart.map(c => ({ menu_item_id: c.id, item_name: c.name, quantity: c.quantity, unit_price: c.price })),
+      special_instructions: specialInstructions || undefined,
       payment_method: paymentMethodHint,
     });
     refreshOrderCount(); // reflect this terminal's own order without waiting for the next poll tick
@@ -415,13 +426,14 @@ export default function POSPage() {
       );
       printReceipt(order.id);
       setCart([]);
+      setSpecialInstructions(''); setShowInstructionsInput(false);
+      setMobileCartOpen(false);
       setActiveOrder(null);
       setTenderAmount('');
       setSelectedCustomer(null);
       setAwardLoyalty(true);
       setPointsToRedeem('');
       setSplitPaymentMethod('cash');
-      setShowMobileCart(false);
       clearCartDraft();
     } else {
       setActiveOrder(prev => prev ? { ...prev, amount_paid: prev.total - balanceRemaining } : prev);
@@ -481,17 +493,19 @@ export default function POSPage() {
           customer_name: selectedCustomer?.full_name || 'Walk-in Customer',
           guests: 1,
           items: cart.map(c => ({ menu_item_id: c.id, item_name: c.name, quantity: c.quantity, unit_price: c.price })),
+          special_instructions: specialInstructions || undefined,
           payment_method: method,
         },
         { payment_method: method, amount: total, award_loyalty: awardLoyalty }
       );
       toast.success(`Sale queued (${formatCurrency(total)}) — will sync automatically once back online`, { icon: '📥', duration: 5000 });
       setCart([]);
+      setSpecialInstructions(''); setShowInstructionsInput(false);
+      setMobileCartOpen(false);
       setActiveOrder(null);
       setTenderAmount('');
       setSelectedCustomer(null);
       setAwardLoyalty(true);
-      setShowMobileCart(false);
       clearCartDraft();
     } catch {
       toast.error('Failed to queue this sale locally — please try again');
@@ -561,7 +575,9 @@ export default function POSPage() {
       toast.success('M-Pesa payment confirmed!');
       setTimeout(() => {
         setShowMpesaModal(false); setCart([]); setActiveOrder(null); setTenderAmount('');
-        setSelectedCustomer(null); setShowMobileCart(false); clearCartDraft();
+        setSpecialInstructions(''); setShowInstructionsInput(false);
+        setMobileCartOpen(false);
+        setSelectedCustomer(null); clearCartDraft();
       }, 1500);
     }
   };
@@ -606,7 +622,12 @@ export default function POSPage() {
       }, 3000);
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to send STK Push';
-      toast.error(msg); setMpesaStatus('failed');
+      // Deliberately distinct wording from the customer-side outcomes below
+      // (expired/cancelled/failed after the push actually reached their
+      // phone) — this failure happens before the customer is involved at
+      // all, so it shouldn't read like their payment failed.
+      toast.error(`Couldn't send the payment request: ${msg}`);
+      setMpesaStatus('failed');
     }
   };
 
@@ -666,6 +687,8 @@ export default function POSPage() {
       });
       toast.success(label ? `Draft "${label}" saved` : 'Order held — resume it anytime from Held');
       setCart([]);
+      setSpecialInstructions(''); setShowInstructionsInput(false);
+      setMobileCartOpen(false);
       setSelectedTableId(null);
       fetchHeldOrders();
     } catch {
@@ -686,7 +709,6 @@ export default function POSPage() {
     setOrderType(h.type === 'dine_in' ? 'Dine In' : h.type === 'takeaway' ? 'Takeaway' : 'Delivery');
     setSelectedTableId(h.table_id || null);
     setShowHeldPanel(false);
-    if (isMobile) setShowMobileCart(true);
     try {
       await api.delete(`/held-orders/${h.id}`);
       fetchHeldOrders();
@@ -724,12 +746,12 @@ export default function POSPage() {
   /* ─────────────────────────────────────────────────────────────────── */
   return (
     <div
-      className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden"
+      className="flex flex-col md:flex-row h-screen overflow-hidden"
       onClick={() => { setShowTablePicker(false); setShowTypePicker(false); setShowHeldPanel(false); }}
     >
 
       {/* ══════════════ LEFT — Menu ══════════════ */}
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden p-4 gap-3 pb-24 md:pb-4">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden p-4 gap-3">
 
         {/* Top bar */}
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -741,7 +763,22 @@ export default function POSPage() {
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center flex-wrap gap-2">
+            {/* Mobile-only cart toggle — desktop already shows the cart
+                permanently as a side panel, so this button doesn't exist
+                there at all (md:hidden) rather than being redundant. */}
+            <button
+              onClick={e => { e.stopPropagation(); setMobileCartOpen(true); }}
+              className="md:hidden btn-secondary flex items-center gap-1.5 text-sm py-2 relative"
+              title="View cart"
+            >
+              <ShoppingCart size={15} />
+              {itemCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-status-error rounded-full text-[10px] font-bold flex items-center justify-center text-white">
+                  {itemCount > 99 ? '99+' : itemCount}
+                </span>
+              )}
+            </button>
             <button onClick={() => setShowScanModal(true)} className="btn-secondary flex items-center gap-1.5 text-sm py-2" title="Scan">
               <Scan size={15} /> <span className="hidden sm:inline">Scan</span>
             </button>
@@ -802,7 +839,7 @@ export default function POSPage() {
               <button
                 onClick={() => { if (orderType === 'Dine In') { setShowTablePicker(p => !p); setShowTypePicker(false); setShowHeldPanel(false); } }}
                 disabled={orderType !== 'Dine In'}
-                className="btn-secondary flex items-center gap-1.5 text-sm py-2 font-bold text-brand disabled:opacity-40 disabled:cursor-not-allowed"
+                className="btn-secondary flex items-center gap-1.5 text-sm py-2 font-bold text-brand disabled:opacity-40 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
               >
                 {orderType === 'Dine In' ? (selectedTable ? selectedTable.table_number : 'Select Table') : orderType}
                 {orderType === 'Dine In' && <ChevronDown size={13} />}
@@ -835,7 +872,7 @@ export default function POSPage() {
             <div className="relative" onClick={e => e.stopPropagation()}>
               <button
                 onClick={() => { setShowTypePicker(p => !p); setShowTablePicker(false); setShowHeldPanel(false); }}
-                className="btn-secondary flex items-center gap-1.5 text-sm py-2"
+                className="btn-secondary flex items-center gap-1.5 text-sm py-2 shrink-0 whitespace-nowrap"
               >
                 <ShoppingCart size={13} /> {orderType} <ChevronDown size={13} />
               </button>
@@ -885,9 +922,14 @@ export default function POSPage() {
         ) : (
           <div className="flex-1 overflow-y-auto">
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-              {filtered.map(item => (
-                <button key={item.id} onClick={() => addToCart(item)}
-                  className="card p-0 overflow-hidden hover:border-brand/60 active:scale-95 transition-all text-left group cursor-pointer">
+              {filtered.map(item => {
+                const manuallyUnavailable = !!item.status && item.status !== 'available';
+                return (
+                <button key={item.id} onClick={() => !manuallyUnavailable && addToCart(item)}
+                  disabled={manuallyUnavailable}
+                  className={`card p-0 overflow-hidden transition-all text-left group ${
+                    manuallyUnavailable ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-brand/60 active:scale-95 cursor-pointer'
+                  }`}>
                   <div className="aspect-video bg-surface-50 overflow-hidden relative">
                     <img
                       src={resolveMenuImage(item.image_url, item.name)}
@@ -896,10 +938,17 @@ export default function POSPage() {
                       loading="lazy"
                       onError={e => { (e.target as HTMLImageElement).src = menuImagePlaceholder(item.name); }}
                     />
-                    {/* Countable-stock alert — the actual "let it alert when
-                        it runs out" behaviour, right where the cashier is
-                        tapping to add items. */}
-                    {item.track_stock && (
+                    {/* A manager/chef's manual toggle (for dishes with no
+                        per-unit inventory count, like pilau) takes priority
+                        over the countable-stock badge below — "we're out
+                        for the day" is a more direct signal than any
+                        quantity count for an item that was never
+                        inventory-tracked to begin with. */}
+                    {manuallyUnavailable ? (
+                      <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-status-error text-white">
+                        Out of stock
+                      </span>
+                    ) : item.track_stock && (
                       <span className={`absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${
                         (item.stock_quantity ?? 0) <= 0 ? 'bg-status-error text-white'
                         : (item.stock_quantity ?? 0) <= (item.reorder_level ?? 5) ? 'bg-status-warning text-black'
@@ -919,7 +968,8 @@ export default function POSPage() {
                     )}
                   </div>
                 </button>
-              ))}
+                );
+              })}
             </div>
             <p className="text-xs text-text-muted text-center pt-3 pb-1">
               Showing {filtered.length} of {items.length} items
@@ -928,89 +978,64 @@ export default function POSPage() {
         )}
 
         {/* Bottom actions */}
-        <div className="flex items-center gap-2 pt-3 border-t border-border">
-          <button onClick={() => holdCurrentOrder()} className="btn-secondary flex-1 py-2.5 text-sm flex items-center justify-center gap-2" title="Hold Order">
+        <div className="flex items-center gap-1.5 sm:gap-2 pt-3 border-t border-border">
+          <button onClick={() => holdCurrentOrder()} className="btn-secondary flex-1 min-w-0 py-2.5 text-sm flex items-center justify-center gap-2" title="Hold Order">
             <Pause size={14} /> <span className="hidden lg:inline">Hold Order</span>
           </button>
-          <button onClick={saveDraft} className="btn-secondary flex-1 py-2.5 text-sm flex items-center justify-center gap-2" title="Save Draft">
+          <button onClick={saveDraft} className="btn-secondary flex-1 min-w-0 py-2.5 text-sm flex items-center justify-center gap-2" title="Save Draft">
             <Save size={14} /> <span className="hidden lg:inline">Save Draft</span>
           </button>
           <button
-            onClick={() => setCart([])}
-            className="btn-secondary flex-1 py-2.5 text-sm flex items-center justify-center gap-2 text-status-error border-status-error/20 hover:bg-status-error/5"
+            onClick={() => { setCart([]); setSpecialInstructions(''); setShowInstructionsInput(false); }}
+            className="btn-secondary flex-1 min-w-0 py-2.5 text-sm flex items-center justify-center gap-2 text-status-error border-status-error/20 hover:bg-status-error/5"
             title="Clear Cart"
           >
             <Trash2 size={14} /> <span className="hidden lg:inline">Clear Cart</span>
           </button>
-          <button
-            onClick={() => { if (isMobile) setShowMobileCart(true); }}
-            className="btn-secondary py-2.5 px-4 text-sm flex items-center gap-2"
-            title="View cart"
-          >
+          <button onClick={() => setMobileCartOpen(true)} className="btn-secondary py-2.5 px-2.5 sm:px-4 text-sm flex items-center gap-1.5 sm:gap-2 shrink-0" title="View cart">
             <ShoppingCart size={14} /> <span className="hidden sm:inline">Items</span> ({itemCount})
           </button>
         </div>
       </div>
 
-      {/* Mobile cart backdrop */}
-      {showMobileCart && (
-        <div
-          className="md:hidden fixed inset-0 bg-black/50 z-40"
-          onClick={() => setShowMobileCart(false)}
-          aria-hidden
-        />
-      )}
-
-      {/* Floating cart bar — phones only; opens the full cart sheet */}
-      {!showMobileCart && (
-        <button
-          type="button"
-          onClick={e => { e.stopPropagation(); setShowMobileCart(true); }}
-          className="md:hidden fixed bottom-4 left-4 right-4 z-30 flex items-center gap-2 py-3.5 px-4 rounded-lg bg-brand text-black font-bold shadow-lg"
-        >
-          <ShoppingCart size={18} className="shrink-0" />
-          <span className="truncate">Cart ({itemCount})</span>
-          <span className="ml-auto shrink-0 font-black">{formatCurrency(activeOrder ? Math.max(0, activeOrder.total - activeOrder.amount_paid) : total)}</span>
-        </button>
+      {/* Backdrop — mobile only, closes the drawer on tap-outside. Doesn't
+          exist in the DOM at all on desktop (rather than existing-but-hidden)
+          so it can never intercept a click on the permanent side panel. */}
+      {mobileCartOpen && (
+        <div className="fixed inset-0 bg-black/60 z-40 md:hidden" onClick={() => setMobileCartOpen(false)} />
       )}
 
       {/* ══════════════ RIGHT — Cart ══════════════ */}
       <div
-        className={`bg-surface-card flex flex-col min-h-0 w-full max-w-full overflow-x-hidden md:w-[340px] md:shrink-0 md:border-l md:border-border md:max-h-none ${
-          showMobileCart
-            ? 'fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] rounded-t-2xl border-t border-border shadow-modal'
-            : 'hidden md:flex'
-        }`}
-        onClick={e => e.stopPropagation()}
+        className={`w-full md:w-[340px] md:shrink-0 border-t md:border-t-0 md:border-l border-border bg-surface-card flex flex-col
+          max-h-[85vh] md:max-h-none
+          fixed inset-x-0 bottom-0 z-50 rounded-t-2xl md:rounded-none transition-transform duration-300 ease-in-out
+          md:static md:z-auto md:translate-y-0
+          ${mobileCartOpen ? 'translate-y-0' : 'translate-y-full'}`}
       >
-
-        {/* Sheet handle — mobile only */}
-        <div className="md:hidden flex justify-center pt-2.5 pb-1 shrink-0">
-          <div className="w-10 h-1 rounded-full bg-border" />
+        {/* Mobile-only drag handle + close, purely visual/functional cues
+            that this is a dismissible sheet — neither exists on desktop
+            where the panel is just permanently docked. */}
+        <div className="md:hidden flex justify-center pt-2 pb-1">
+          <span className="w-10 h-1 rounded-full bg-border" />
         </div>
 
         {/* Table header */}
-        <div className="px-5 py-3 md:py-4 border-b border-border flex items-center justify-between flex-wrap gap-2 shrink-0">
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <ShoppingCart size={17} className="text-brand shrink-0" />
             <span className="font-bold text-base truncate">
               {orderType === 'Dine In' ? (selectedTable ? `Table ${selectedTable.table_number}` : 'Dine In — no table selected') : orderType}
             </span>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {orderType === 'Dine In' && (
-              <button onClick={() => setShowTablePicker(true)} className="text-sm text-brand font-medium hover:text-brand-400">
-                {selectedTable ? 'Change' : 'Select table'}
-              </button>
-            )}
-            <button
-              onClick={() => setShowMobileCart(false)}
-              className="md:hidden btn-ghost p-1.5 -mr-1"
-              aria-label="Close cart"
-            >
-              <X size={18} />
+          <button onClick={() => setMobileCartOpen(false)} className="md:hidden btn-ghost p-1 shrink-0">
+            <X size={16} />
+          </button>
+          {orderType === 'Dine In' && (
+            <button onClick={() => setShowTablePicker(true)} className="text-sm text-brand font-medium hover:text-brand-400 shrink-0">
+              {selectedTable ? 'Change' : 'Select table'}
             </button>
-          </div>
+          )}
         </div>
 
         {/* Customer + loyalty */}
@@ -1094,14 +1119,32 @@ export default function POSPage() {
           )}
 
           {cart.length > 0 && !activeOrder && (
-            <button className="w-full text-left text-sm text-text-muted hover:text-brand transition-colors py-1 border-t border-border/50 pt-3">
-              ✏ Add special instructions
-            </button>
+            showInstructionsInput ? (
+              <div className="border-t border-border/50 pt-3 space-y-1.5">
+                <textarea
+                  value={specialInstructions}
+                  onChange={e => setSpecialInstructions(e.target.value)}
+                  onBlur={() => setShowInstructionsInput(false)}
+                  autoFocus
+                  rows={2}
+                  placeholder="e.g. no onions, extra spicy, allergy note…"
+                  className="input w-full text-sm resize-none"
+                />
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowInstructionsInput(true)}
+                className="w-full text-left text-sm text-text-muted hover:text-brand transition-colors py-1 border-t border-border/50 pt-3 flex items-center gap-1.5"
+              >
+                <Pencil size={13} />
+                {specialInstructions ? <span className="truncate text-text-secondary">{specialInstructions}</span> : 'Add special instructions'}
+              </button>
+            )
           )}
         </div>
 
         {/* ── Totals — now showing the real breakdown the backend charges ── */}
-        <div className="w-full min-w-0 max-w-full overflow-x-hidden px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-border space-y-3 shrink-0">
+        <div className="px-5 py-4 border-t border-border space-y-3">
           {activeOrder ? (
             <>
               {/* Once an order exists, the authoritative numbers come from
@@ -1175,27 +1218,22 @@ export default function POSPage() {
             </div>
           )}
 
-          {/* Payment method buttons — 2 columns on phones so labels don't overflow */}
-          <div className={`grid gap-2 mt-1 min-w-0 w-full ${
-            availableMethods.length <= 2 ? 'grid-cols-2'
-            : availableMethods.length === 3 ? 'grid-cols-2 md:grid-cols-3'
-            : availableMethods.length === 4 ? 'grid-cols-2 md:grid-cols-4'
-            : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-5'
-          }`}>
+          {/* Payment method buttons */}
+          <div className={`grid gap-2 mt-1 ${availableMethods.length <= 2 ? 'grid-cols-2' : availableMethods.length === 3 ? 'grid-cols-3' : availableMethods.length >= 5 ? 'grid-cols-5' : 'grid-cols-4'}`}>
             {availableMethods.map(m => (
               <button
                 key={m}
                 onClick={() => setPaymentMethod(m)}
                 disabled={activeOrder !== null && m === 'Split Bill'}
                 title={activeOrder !== null && m === 'Split Bill' ? 'Split Bill divides a fresh order — cancel this order to use it' : undefined}
-                className={`min-w-0 py-3 px-1 rounded-xl text-[10px] sm:text-xs font-bold transition-colors flex flex-col items-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed ${
+                className={`py-3 rounded-xl text-xs font-bold transition-colors flex flex-col items-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed ${
                   paymentMethod === m
                     ? 'bg-brand text-black shadow-brand'
                     : 'bg-surface-50 text-text-secondary hover:text-text-primary border border-border hover:border-brand/30'
                 }`}
               >
                 {m === 'Cash' ? <Banknote size={17} /> : m === 'M-Pesa' ? <Smartphone size={17} /> : m === 'Card' ? <CreditCard size={17} /> : m === 'Points' ? <Star size={17} /> : <Shuffle size={17} />}
-                <span className="truncate w-full text-center leading-tight">{m}</span>
+                {m}
               </button>
             ))}
           </div>
@@ -1207,17 +1245,9 @@ export default function POSPage() {
             className="pos-checkout-btn disabled:opacity-50 disabled:cursor-not-allowed mt-1"
           >
             {processingPayment
-              ? <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin shrink-0" />
-              : <ShoppingCart size={17} className="shrink-0" />}
-            <span className="truncate">
-              {processingPayment
-                ? 'Processing...'
-                : activeOrder
-                  ? `Charge ${formatCurrency(tenderAmount ? Number(tenderAmount) : Math.max(0, activeOrder.total - activeOrder.amount_paid))}`
-                  : !isOnline
-                    ? (isMobile ? 'Complete Sale' : 'Complete Sale (Offline)   F2')
-                    : (isMobile ? 'Checkout' : 'Checkout   F2')}
-            </span>
+              ? <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+              : <ShoppingCart size={17} />}
+            {processingPayment ? 'Processing...' : activeOrder ? `Charge ${formatCurrency(tenderAmount ? Number(tenderAmount) : Math.max(0, activeOrder.total - activeOrder.amount_paid))}` : !isOnline ? 'Complete Sale (Offline)   F2' : 'Checkout   F2'}
           </button>
 
           {activeOrder && (
@@ -1231,6 +1261,8 @@ export default function POSPage() {
                   toast.error('Could not cancel automatically — cancel it from the Orders page.');
                 }
                 setActiveOrder(null); setCart([]); setTenderAmount('');
+                setSpecialInstructions(''); setShowInstructionsInput(false);
+                setMobileCartOpen(false);
                 setSelectedCustomer(null); setSelectedTableId(null); clearCartDraft();
               }}
               className="w-full text-center text-xs text-status-error hover:underline pt-1"

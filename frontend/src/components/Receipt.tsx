@@ -74,7 +74,7 @@ export default function Receipt({ order }: { order: Record<string, unknown> | nu
           .pos-receipt {
             display: block; position: fixed; top: 0; left: 0;
             width: 80mm; padding: 4mm; font-family: 'Courier New', monospace;
-            color: #000; background: #fff; font-size: 13px; line-height: 1.5;
+            color: #000; background: #fff; font-size: 15px; line-height: 1.5;
           }
         }
       `}</style>
@@ -84,7 +84,7 @@ export default function Receipt({ order }: { order: Record<string, unknown> | nu
             {businessLogoUrl && (
               <img src={businessLogoUrl} alt="" style={{ maxWidth: '45mm', maxHeight: '20mm', margin: '0 auto 6px', display: 'block' }} />
             )}
-            <div style={{ fontWeight: 700, fontSize: 17 }}>{businessName.toUpperCase()}</div>
+            <div style={{ fontWeight: 700, fontSize: 19 }}>{businessName.toUpperCase()}</div>
             {businessPhone && <div>Tel: {businessPhone}</div>}
           </div>
           <div style={{ borderTop: '1px dashed #000', borderBottom: '1px dashed #000', padding: '4px 0', margin: '6px 0' }}>
@@ -109,7 +109,7 @@ export default function Receipt({ order }: { order: Record<string, unknown> | nu
           </table>
           <div style={{ borderTop: '1px dashed #000', margin: '6px 0', paddingTop: 4 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Subtotal</span><span>{formatCurrency(Number(order.subtotal ?? 0))}</span></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 15, marginTop: 4 }}><span>TOTAL</span><span>{formatCurrency(Number(order.total ?? 0))}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 17, marginTop: 4 }}><span>TOTAL</span><span>{formatCurrency(Number(order.total ?? 0))}</span></div>
           </div>
           {/* Every tender recorded against this order — for a mixed-method
               sale (e.g. part M-Pesa, part cash) this is the one place that
@@ -131,7 +131,7 @@ export default function Receipt({ order }: { order: Record<string, unknown> | nu
                       <span>{formatCurrency(Number(p.amount))}</span>
                     </div>
                     {split?.parts && (
-                      <div style={{ fontSize: 11, opacity: 0.75 }}>Split {split.parts} ways — {formatCurrency(split.per_person || 0)} each</div>
+                      <div style={{ fontSize: 12, opacity: 0.75 }}>Split {split.parts} ways — {formatCurrency(split.per_person || 0)} each</div>
                     )}
                   </div>
                 );
