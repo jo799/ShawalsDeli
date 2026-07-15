@@ -15,6 +15,7 @@ interface Order {
   total: number; amount_paid: number; created_at: string;
   items?: Array<{ item_name: string; quantity: number; unit_price: number; total_price: number }>;
   subtotal?: number;
+  served_by_name?: string; prepared_by_name?: string;
 }
 
 const TABS = ['All Orders', 'Awaiting Payment', 'New', 'Preparing', 'Ready', 'Completed', 'Cancelled'];
@@ -230,6 +231,23 @@ export default function OrdersPage() {
               <div>
                 <p className="text-xs text-text-muted mb-1">Customer</p>
                 <p className="font-medium text-sm">{selected.customer_full_name}</p>
+              </div>
+            )}
+
+            {(selected.served_by_name || selected.prepared_by_name) && (
+              <div className="grid grid-cols-2 gap-3">
+                {selected.served_by_name && (
+                  <div>
+                    <p className="text-xs text-text-muted mb-1">Taken by</p>
+                    <p className="text-sm">{selected.served_by_name}</p>
+                  </div>
+                )}
+                {selected.prepared_by_name && (
+                  <div>
+                    <p className="text-xs text-text-muted mb-1">Prepared by</p>
+                    <p className="text-sm">{selected.prepared_by_name}</p>
+                  </div>
+                )}
               </div>
             )}
 

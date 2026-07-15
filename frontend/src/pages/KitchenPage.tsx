@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ChefHat, Volume2, VolumeX, Maximize2, RefreshCw, CheckCircle, ShoppingCart, Flame, CheckCheck, Timer, Pencil } from 'lucide-react';
+import { ChefHat, Volume2, VolumeX, Maximize2, RefreshCw, CheckCircle, ShoppingCart, Flame, CheckCheck, Timer, Pencil, Bell, BellOff, UserCheck } from 'lucide-react';
 import api from '@/lib/api';
 import { formatTime, toLocalDateString } from '@/lib/utils';
+import { getPushSubscriptionStatus, subscribeToKitchenAlerts, unsubscribeFromKitchenAlerts } from '@/lib/pushNotifications';
 import toast from 'react-hot-toast';
 
 interface Order {
@@ -10,6 +11,7 @@ interface Order {
   created_at: string; completed_at?: string;
   total?: number; amount_paid?: number;
   special_instructions?: string;
+  prepared_by_name?: string;
   items?: Array<{ item_name: string; quantity: number }>;
 }
 
@@ -90,6 +92,11 @@ function OrderCard({ order, onAction, compact }: { order: Order; onAction: (id: 
             <span className="w-2 h-2 rounded-full bg-status-warning animate-pulse" />
             Prep time: {String(Math.floor(mins / 60)).padStart(2, '0')}:{String(mins % 60).padStart(2, '0')}
           </div>
+          {order.prepared_by_name && (
+            <div className="flex items-center gap-1 text-[11px] text-text-muted">
+              <UserCheck size={11} /> {order.prepared_by_name}
+            </div>
+          )}
           <button
             onClick={() => onAction(order.id, 'ready')}
             className="w-full btn-primary py-1.5 text-xs"
@@ -104,6 +111,11 @@ function OrderCard({ order, onAction, compact }: { order: Order; onAction: (id: 
             <span className="w-2 h-2 rounded-full bg-status-success" />
             Ready time: {mins}m
           </div>
+          {order.prepared_by_name && (
+            <div className="flex items-center gap-1 text-[11px] text-text-muted">
+              <UserCheck size={11} /> {order.prepared_by_name}
+            </div>
+          )}
           {order.type === 'dine_in' && Number(order.amount_paid ?? 0) < Number(order.total ?? 0) - 0.01 && (
             <p className="text-[11px] text-status-warning">
               ⚠ Not fully paid yet — this table's bill needs settling before it can be marked served.
@@ -134,6 +146,27 @@ export default function KitchenPage() {
   const [refreshSeconds, setRefreshSeconds] = useState(30);
   const [soundUnlocked, setSoundUnlocked] = useState(false);
   const knownOrderIds = useRef<Set<string> | null>(null);
+  const [pushStatus, setPushStatus] = useState<'subscribed' | 'unsubscribed' | 'unsupported' | 'denied' | 'loading'>('loading');
+
+  useEffect(() => { getPushSubscriptionStatus().then(setPushStatus); }, []);
+
+  const handleTogglePush = async () => {
+    if (pushStatus === 'subscribed') {
+      await unsubscribeFromKitchenAlerts();
+      setPushStatus('unsubscribed');
+      toast.success('Phone alerts turned off on this device');
+      return;
+    }
+    setPushStatus('loading');
+    const result = await subscribeToKitchenAlerts();
+    if (result.success) {
+      setPushStatus('subscribed');
+      toast.success('This device will now get a notification for every new order');
+    } else {
+      setPushStatus(await getPushSubscriptionStatus());
+      toast.error(result.message || 'Could not enable phone alerts');
+    }
+  };
 
   // Short beep via the Web Audio API — no audio file to ship.
   //
@@ -345,6 +378,19 @@ export default function KitchenPage() {
           <button onClick={() => { setSoundUnlocked(true); setSoundEnabled(v => { const next = !v; if (next) playAlertTone(); return next; }); }} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 px-2 sm:px-3" title="Click to hear a test beep">
             {soundEnabled ? <Volume2 size={12} /> : <VolumeX size={12} />} <span className="hidden sm:inline">Sound {soundEnabled ? 'ON' : 'OFF'}</span>
           </button>
+          {pushStatus !== 'unsupported' && (
+            <button
+              onClick={handleTogglePush}
+              disabled={pushStatus === 'loading' || pushStatus === 'denied'}
+              title={pushStatus === 'denied' ? 'Notifications blocked — enable them in your browser/phone settings' : 'Get a phone notification the moment a new order comes in, even with this tab in the background'}
+              className={`btn-secondary flex items-center gap-1.5 text-xs py-1.5 px-2 sm:px-3 disabled:opacity-50 ${pushStatus === 'subscribed' ? 'border-status-success/40 text-status-success' : ''}`}
+            >
+              {pushStatus === 'subscribed' ? <Bell size={12} /> : <BellOff size={12} />}
+              <span className="hidden sm:inline">
+                {pushStatus === 'loading' ? 'Loading…' : pushStatus === 'denied' ? 'Alerts blocked' : pushStatus === 'subscribed' ? 'Phone alerts ON' : 'Enable phone alerts'}
+              </span>
+            </button>
+          )}
           <button onClick={() => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); }}
             className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 px-2 sm:px-3">
             <Maximize2 size={12} /> <span className="hidden sm:inline">Fullscreen</span>
