@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Plus, Search, Filter, Eye } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
@@ -31,6 +31,7 @@ const statusMap: Record<string, string> = {
 
 export default function OrdersPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuthStore();
   // Refunding/voiding is money leaving the business — same restriction the
   // backend already enforces (see routes/index.ts: authorize('administrator',
@@ -67,6 +68,15 @@ export default function OrdersPage() {
 
   useEffect(() => { fetchOrders(); }, [activeTab, page, fetchOrders]);
   useEffect(() => { const t = setTimeout(fetchOrders, 400); return () => clearTimeout(t); }, [search, fetchOrders]);
+
+  useEffect(() => {
+    const openOrderId = (location.state as { openOrderId?: string } | null)?.openOrderId;
+    if (!openOrderId) return;
+    api.get(`/orders/${openOrderId}`)
+      .then(({ data }) => setSelected(data.data))
+      .catch(() => toast.error('Could not open that order'))
+      .finally(() => navigate(location.pathname, { replace: true, state: {} }));
+  }, [location.state, location.pathname, navigate]);
 
   const printReceipt = async (orderId: string) => {
     try {

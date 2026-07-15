@@ -6,6 +6,7 @@ import api from '@/lib/api';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { formatCurrency, toLocalDateString, resolveMenuImage } from '@/lib/utils';
 import { LoadingPage } from '@/components/ui';
+import ReportPrint from '@/components/ReportPrintDocument';
 import toast from 'react-hot-toast';
 
 const COLORS = ['#F59E0B','#10B981','#3B82F6','#8B5CF6','#EF4444'];
@@ -49,6 +50,7 @@ export default function ReportsPage() {
   const [date, setDate] = useState(toLocalDateString());
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [printReady, setPrintReady] = useState(false);
 
   // The tab used to be entirely cosmetic — clicking Weekly or Monthly just
   // silently re-fetched the exact same single-day report a second time.
@@ -87,6 +89,19 @@ export default function ReportsPage() {
   })) || [];
 
   const peakPoint = data?.trend.reduce((max, h) => h.sales > (max?.sales || 0) ? h : max, data.trend[0]);
+  const [startDate, endDate] = getRange();
+
+  const handlePrint = () => {
+    if (!data) {
+      toast.error('No report data to print');
+      return;
+    }
+    if (!printReady) {
+      toast.error('Preparing report for print — try again in a moment');
+      return;
+    }
+    window.print();
+  };
 
   const exportCsv = () => {
     if (!data) return;
@@ -135,7 +150,7 @@ export default function ReportsPage() {
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input text-xs py-1.5 w-42" />
           <button onClick={fetchReport} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5"><RefreshCw size={12} /> Refresh</button>
           <button onClick={exportCsv} disabled={!data} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 disabled:opacity-50"><Download size={12} /> Export</button>
-          <button onClick={() => window.print()} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5"><Printer size={12} /> Print</button>
+          <button onClick={handlePrint} disabled={!data || !printReady} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 disabled:opacity-50"><Printer size={12} /> Print</button>
         </div>
       </div>
 
@@ -351,6 +366,15 @@ export default function ReportsPage() {
           </p>
         </>
       ) : null}
+
+      <ReportPrint
+        data={data}
+        tab={tab}
+        startDate={startDate}
+        endDate={endDate}
+        periodLabel={periodLabel}
+        onReadyChange={setPrintReady}
+      />
     </div>
   );
 }
