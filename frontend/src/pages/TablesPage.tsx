@@ -78,12 +78,6 @@ export default function TablesPage() {
   const [tableForm, setTableForm] = useState({ table_number: '', area: 'Main Hall', capacity: 2 });
   const [savingTable, setSavingTable] = useState(false);
   const [defaultCapacity, setDefaultCapacity] = useState(2);
-  const [showTransferModal, setShowTransferModal] = useState(false);
-  const [transferTargetId, setTransferTargetId] = useState('');
-  const [transferring, setTransferring] = useState(false);
-  const [showMergeModal, setShowMergeModal] = useState(false);
-  const [mergeTargetId, setMergeTargetId] = useState('');
-  const [merging, setMerging] = useState(false);
   useEffect(() => {
     api.get('/settings').then(r => {
       const cap = parseInt(r.data.data.default_table_capacity);
@@ -111,7 +105,6 @@ export default function TablesPage() {
       setTables(tablesRes.data.data);
       setStats(tablesRes.data.stats);
       setReservations(resRes.data.data);
-      setSelected(prev => (prev ? tablesRes.data.data.find((t: Table) => t.id === prev.id) ?? null : null));
     } catch { toast.error('Failed to load tables'); }
     finally { setLoading(false); }
   }, [showAllUpcoming]);
@@ -206,6 +199,7 @@ export default function TablesPage() {
   const submitReservation = async () => {
     if (!reservationForm.customer_name.trim()) { toast.error('Customer name is required'); return; }
     if (!reservationForm.table_id) { toast.error('Select a table'); return; }
+    if (!Number.isInteger(reservationForm.guests) || reservationForm.guests < 1) { toast.error('Guests must be a whole number of at least 1'); return; }
     if (!reservationForm.reservation_time) { toast.error('Select a date and time'); return; }
     if (new Date(reservationForm.reservation_time).getTime() < Date.now() - 5 * 60 * 1000) {
       toast.error('Reservation time must be in the future'); return;
@@ -249,67 +243,6 @@ export default function TablesPage() {
       toast.error('Failed to update reservation');
     }
   };
-
-  const openTransferModal = () => {
-    if (!selected?.current_order_id) {
-      toast.error('This table has no active order to transfer');
-      return;
-    }
-    const firstTarget = tables.find(t => t.id !== selected.id && !t.current_order_id && ['available', 'reserved', 'cleaning'].includes(t.status));
-    setTransferTargetId(firstTarget?.id || '');
-    setShowTransferModal(true);
-  };
-
-  const submitTransfer = async () => {
-    if (!selected || !transferTargetId) { toast.error('Select a destination table'); return; }
-    setTransferring(true);
-    try {
-      const res = await api.put(`/tables/${selected.id}/transfer`, { target_table_id: transferTargetId });
-      toast.success(res.data.message || 'Table transferred');
-      setShowTransferModal(false);
-      setSelected(null);
-      fetchData();
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Transfer failed';
-      toast.error(msg);
-    } finally { setTransferring(false); }
-  };
-
-  const openMergeModal = () => {
-    if (!selected?.current_order_id) {
-      toast.error('This table has no active order to merge from');
-      return;
-    }
-    const firstOther = tables.find(t => t.id !== selected.id && t.current_order_id && t.status === 'occupied');
-    if (!firstOther) {
-      toast.error('No other occupied table with an open order to merge');
-      return;
-    }
-    setMergeTargetId(firstOther.id);
-    setShowMergeModal(true);
-  };
-
-  const submitMerge = async () => {
-    if (!selected || !mergeTargetId) { toast.error('Select a table to merge'); return; }
-    if (!confirm(`Merge the other table's order into Table ${selected.table_number}? The other table will be cleared.`)) return;
-    setMerging(true);
-    try {
-      const res = await api.put(`/tables/${selected.id}/merge`, { other_table_id: mergeTargetId });
-      toast.success(res.data.message || 'Tables merged');
-      setShowMergeModal(false);
-      fetchData();
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Merge failed';
-      toast.error(msg);
-    } finally { setMerging(false); }
-  };
-
-  const transferTargets = selected
-    ? tables.filter(t => t.id !== selected.id && !t.current_order_id && ['available', 'reserved', 'cleaning'].includes(t.status))
-    : [];
-  const mergeTargets = selected
-    ? tables.filter(t => t.id !== selected.id && t.current_order_id && t.status === 'occupied')
-    : [];
 
   const areas = [...new Set(tables.map(t => t.area))];
 
@@ -549,16 +482,15 @@ export default function TablesPage() {
               <div className="grid grid-cols-3 gap-2">
                 {[
                   { Icon: ShoppingCart, label: 'Add Order', onClick: () => navigate('/pos') },
-                  { Icon: ArrowLeftRight, label: 'Transfer', onClick: openTransferModal, disabled: !selected.current_order_id },
-                  { Icon: Receipt, label: 'Split Bill', onClick: () => navigate('/pos') },
-                  { Icon: Merge, label: 'Merge Table', onClick: openMergeModal, disabled: !selected.current_order_id || mergeTargets.length === 0 },
+                  { Icon: ArrowLeftRight, label: 'Transfer', onClick: () => toast('Transferring a table isn\'t built yet — coming in a future update.', { icon: 'ℹ️' }) },
+                  { Icon: Receipt, label: 'Split Bill', onClick: () => navigate('/pos') }, // Split Bill lives in the POS checkout flow
+                  { Icon: Merge, label: 'Merge Table', onClick: () => toast('Merging tables isn\'t built yet — coming in a future update.', { icon: 'ℹ️' }) },
                   { Icon: Printer, label: 'Print Bill', onClick: () => toast('Print this from the Orders page once the order is selected.', { icon: 'ℹ️' }) },
                   { Icon: X, label: 'Close Table', danger: true, onClick: () => closeTable(selected) },
                 ].map(action => (
                   <button key={action.label}
                     onClick={action.onClick}
-                    disabled={action.disabled}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-lg border text-[10px] font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed
+                    className={`flex flex-col items-center gap-1 p-2 rounded-lg border text-[10px] font-medium transition-colors
                       ${action.danger
                         ? 'border-status-error/30 text-status-error hover:bg-status-error/10'
                         : 'border-border text-text-secondary hover:border-brand/40 hover:text-brand hover:bg-brand/5'
@@ -572,10 +504,7 @@ export default function TablesPage() {
             </div>
 
             {selected.current_order_id && (
-              <button
-                onClick={() => navigate('/orders', { state: { openOrderId: selected.current_order_id } })}
-                className="btn-secondary w-full text-sm flex items-center justify-center gap-2"
-              >
+              <button className="btn-secondary w-full text-sm flex items-center justify-center gap-2">
                 <Eye size={14} /> View Order
               </button>
             )}
@@ -625,7 +554,7 @@ export default function TablesPage() {
               <input
                 type="number" className="input" min={1} step={1}
                 value={reservationForm.guests}
-                onChange={e => setReservationForm(f => ({ ...f, guests: Math.max(1, Math.round(+e.target.value)) }))}
+                onChange={e => setReservationForm(f => ({ ...f, guests: Math.round(+e.target.value) }))}
               />
             </div>
           </div>
@@ -650,74 +579,6 @@ export default function TablesPage() {
             <button onClick={() => setShowReservationModal(false)} className="btn-secondary flex-1">Cancel</button>
             <button onClick={submitReservation} disabled={savingReservation} className="btn-primary flex-1 disabled:opacity-50">
               {savingReservation ? 'Saving…' : 'Add Reservation'}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Transfer table — move this table's open order to another empty table */}
-      <Modal open={showTransferModal} onClose={() => setShowTransferModal(false)} title={`Transfer Table ${selected?.table_number || ''}`}>
-        <div className="space-y-4">
-          <p className="text-sm text-text-secondary">
-            Move the open order from <span className="font-medium text-text-primary">Table {selected?.table_number}</span> to another table.
-            The current table will be freed; the destination table will show the same bill.
-          </p>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Move to table</label>
-            <select
-              className="select"
-              value={transferTargetId}
-              onChange={e => setTransferTargetId(e.target.value)}
-            >
-              <option value="">Select destination</option>
-              {transferTargets.map(t => (
-                <option key={t.id} value={t.id}>
-                  {t.table_number} ({t.area}) — {t.status}
-                </option>
-              ))}
-            </select>
-            {transferTargets.length === 0 && (
-              <p className="text-[11px] text-status-warning mt-1">No empty tables available to transfer to.</p>
-            )}
-          </div>
-          <div className="flex gap-3 pt-2">
-            <button onClick={() => setShowTransferModal(false)} className="btn-secondary flex-1">Cancel</button>
-            <button onClick={submitTransfer} disabled={transferring || !transferTargetId} className="btn-primary flex-1 disabled:opacity-50">
-              {transferring ? 'Transferring…' : 'Transfer Order'}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Merge tables — combine another occupied table's order into this one */}
-      <Modal open={showMergeModal} onClose={() => setShowMergeModal(false)} title={`Merge into Table ${selected?.table_number || ''}`}>
-        <div className="space-y-4">
-          <p className="text-sm text-text-secondary">
-            Combine another table&apos;s open order into <span className="font-medium text-text-primary">Table {selected?.table_number}</span>.
-            Items and any payments from the other table are added to this bill; the other table is cleared.
-          </p>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Merge from table</label>
-            <select
-              className="select"
-              value={mergeTargetId}
-              onChange={e => setMergeTargetId(e.target.value)}
-            >
-              <option value="">Select table to merge</option>
-              {mergeTargets.map(t => (
-                <option key={t.id} value={t.id}>
-                  {t.table_number} ({t.area}) — {t.order_total ? formatCurrency(t.order_total) : 'Open order'}
-                </option>
-              ))}
-            </select>
-            {mergeTargets.length === 0 && (
-              <p className="text-[11px] text-status-warning mt-1">No other occupied tables with open orders.</p>
-            )}
-          </div>
-          <div className="flex gap-3 pt-2">
-            <button onClick={() => setShowMergeModal(false)} className="btn-secondary flex-1">Cancel</button>
-            <button onClick={submitMerge} disabled={merging || !mergeTargetId} className="btn-primary flex-1 disabled:opacity-50">
-              {merging ? 'Merging…' : 'Merge Orders'}
             </button>
           </div>
         </div>
@@ -752,7 +613,7 @@ export default function TablesPage() {
               <input
                 type="number" min={1} step={1} className="input"
                 value={tableForm.capacity}
-                onChange={e => setTableForm(f => ({ ...f, capacity: Math.max(1, Math.round(+e.target.value)) }))}
+                onChange={e => setTableForm(f => ({ ...f, capacity: Math.round(+e.target.value) }))}
               />
             </div>
           </div>
