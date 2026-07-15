@@ -157,6 +157,18 @@ export default function KitchenPage() {
       toast.success('Phone alerts turned off on this device');
       return;
     }
+    if (pushStatus === 'denied') {
+      // Once a browser has denied a site's notification permission, no
+      // amount of JS can re-trigger that prompt — this is a deliberate
+      // browser security restriction, not something a "try again" button
+      // can work around. The only way forward is the person manually
+      // resetting it in their own browser settings.
+      toast.error(
+        'Notifications are blocked for this site. On Android Chrome: tap the ⓘ or 🔒 icon next to the address bar → Permissions → Notifications → Allow. Then reload this page and try again.',
+        { duration: 8000 }
+      );
+      return;
+    }
     setPushStatus('loading');
     const result = await subscribeToKitchenAlerts();
     if (result.success) {
@@ -164,7 +176,7 @@ export default function KitchenPage() {
       toast.success('This device will now get a notification for every new order');
     } else {
       setPushStatus(await getPushSubscriptionStatus());
-      toast.error(result.message || 'Could not enable phone alerts');
+      toast.error(result.message || 'Could not enable phone alerts', { duration: 7000 });
     }
   };
 
@@ -381,9 +393,9 @@ export default function KitchenPage() {
           {pushStatus !== 'unsupported' && (
             <button
               onClick={handleTogglePush}
-              disabled={pushStatus === 'loading' || pushStatus === 'denied'}
+              disabled={pushStatus === 'loading'}
               title={pushStatus === 'denied' ? 'Notifications blocked — enable them in your browser/phone settings' : 'Get a phone notification the moment a new order comes in, even with this tab in the background'}
-              className={`btn-secondary flex items-center gap-1.5 text-xs py-1.5 px-2 sm:px-3 disabled:opacity-50 ${pushStatus === 'subscribed' ? 'border-status-success/40 text-status-success' : ''}`}
+              className={`btn-secondary flex items-center gap-1.5 text-xs py-1.5 px-2 sm:px-3 disabled:opacity-50 ${pushStatus === 'subscribed' ? 'border-status-success/40 text-status-success' : pushStatus === 'denied' ? 'border-status-warning/40 text-status-warning' : ''}`}
             >
               {pushStatus === 'subscribed' ? <Bell size={12} /> : <BellOff size={12} />}
               <span className="hidden sm:inline">
