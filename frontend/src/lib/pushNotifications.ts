@@ -37,14 +37,23 @@ export async function subscribeToKitchenAlerts(): Promise<{ success: boolean; me
     return { success: false, message: 'Push notifications are not supported in this browser.' };
   }
   try {
+    // Ask for permission FIRST, before any await — some mobile browsers
+    // (much stricter about this than desktop) only honor requestPermission
+    // as a direct response to a user tap. Even one network round-trip
+    // ahead of it can let that "real user gesture" window expire, silently
+    // blocking the prompt on mobile while the exact same code worked fine
+    // on desktop.
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      const iosHint = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window.navigator as { standalone?: boolean }).standalone
+        ? ' On iPhone/iPad, Safari only supports this after adding the site to your Home Screen first (Share → Add to Home Screen), then opening it from there.'
+        : '';
+      return { success: false, message: `Notification permission was not granted.${iosHint}` };
+    }
+
     const { data } = await api.get('/push/config');
     if (!data.data.configured || !data.data.publicKey) {
       return { success: false, message: 'Push notifications are not configured on the server yet.' };
-    }
-
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
-      return { success: false, message: 'Notification permission was not granted.' };
     }
 
     const registration = await navigator.serviceWorker.register('/sw.js');
