@@ -8,7 +8,7 @@ import toast from 'react-hot-toast';
 interface Order {
   id: string; order_number: string; type: string; status: string;
   table_number?: string; customer_name?: string;
-  created_at: string; completed_at?: string;
+  created_at: string; updated_at?: string; completed_at?: string;
   total?: number; amount_paid?: number;
   special_instructions?: string;
   prepared_by_name?: string;
@@ -33,6 +33,14 @@ const formatMinutesToServe = (mins: number): string => {
 function OrderCard({ order, onAction, compact }: { order: Order; onAction: (id: string, status: string) => void; compact?: boolean }) {
   const mins = minutesSince(order.created_at);
   const isUrgent = mins > 20 && order.status === 'preparing';
+  // "Prep time"/"Ready time" specifically mean time spent in that status —
+  // using order.created_at here would overstate it, potentially by a lot,
+  // for any order that sat a while in an earlier status first (e.g. waiting
+  // in the new-orders queue before a chef actually started cooking it).
+  // updated_at is bumped on every status transition (see
+  // ordersController.updateOrderStatus), so for an order currently sitting
+  // in preparing/ready, it correctly marks the moment that status began.
+  const minsInStatus = minutesSince(order.updated_at || order.created_at);
 
   return (
     <div className={`card p-3 ${isUrgent ? 'border-status-error/50' : ''} ${compact ? 'opacity-60' : ''}`}>
@@ -90,7 +98,7 @@ function OrderCard({ order, onAction, compact }: { order: Order; onAction: (id: 
         <div className="space-y-1.5">
           <div className="flex items-center gap-1 text-xs text-status-warning">
             <span className="w-2 h-2 rounded-full bg-status-warning animate-pulse" />
-            Prep time: {String(Math.floor(mins / 60)).padStart(2, '0')}:{String(mins % 60).padStart(2, '0')}
+            Prep time: {String(Math.floor(minsInStatus / 60)).padStart(2, '0')}:{String(minsInStatus % 60).padStart(2, '0')}
           </div>
           {order.prepared_by_name && (
             <div className="flex items-center gap-1 text-[11px] text-text-muted">
@@ -109,7 +117,7 @@ function OrderCard({ order, onAction, compact }: { order: Order; onAction: (id: 
         <div className="space-y-1.5">
           <div className="flex items-center gap-1 text-xs text-status-success">
             <span className="w-2 h-2 rounded-full bg-status-success" />
-            Ready time: {mins}m
+            Ready time: {minsInStatus}m
           </div>
           {order.prepared_by_name && (
             <div className="flex items-center gap-1 text-[11px] text-text-muted">
