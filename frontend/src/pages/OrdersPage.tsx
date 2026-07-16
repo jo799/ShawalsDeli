@@ -42,11 +42,12 @@ export default function OrdersPage() {
   const { user } = useAuthStore();
   // Both roles can start a refund, but what actually happens differs:
   // administrators refund directly (backend: authorize('administrator') on
-  // /orders/:id/refund), while managers submit a request that sits pending
-  // until an admin approves it (see submitRefund below and the Refund
-  // Requests panel). Hiding the button entirely for anyone else avoids a
-  // confusing 403 toast on a click that was never going to be allowed.
-  const canRefund = user?.role === 'administrator' || user?.role === 'manager';
+  // /orders/:id/refund), while managers and cashiers submit a request that
+  // sits pending until an admin approves it (see submitRefund below and the
+  // Refund Requests panel). Hiding the button entirely for anyone else
+  // avoids a confusing 403 toast on a click that was never going to be
+  // allowed.
+  const canRefund = user?.role === 'administrator' || user?.role === 'manager' || user?.role === 'cashier';
   const isAdmin = user?.role === 'administrator';
 
   const [orders, setOrders] = useState<Order[]>([]);
