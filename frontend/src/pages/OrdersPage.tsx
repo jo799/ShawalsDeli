@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Search, Filter, Eye } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Search, Filter, Eye, X, Bell, BellOff } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, formatTime } from '@/lib/utils';
@@ -8,6 +8,7 @@ import { PageHeader, StatusBadge, Pagination } from '@/components/ui';
 import Receipt from '@/components/Receipt';
 import { useAuthStore } from '@/store/authStore';
 import toast from 'react-hot-toast';
+import { getPushSubscriptionStatus, subscribeToKitchenAlerts, unsubscribeFromKitchenAlerts } from '@/lib/pushNotifications';
 
 interface Order {
   id: string; order_number: string; type: string; status: string;
@@ -16,6 +17,13 @@ interface Order {
   items?: Array<{ item_name: string; quantity: number; unit_price: number; total_price: number }>;
   subtotal?: number;
   served_by_name?: string; prepared_by_name?: string;
+}
+
+interface RefundRequest {
+  id: string; order_id: string; order_number: string; order_type: string; order_total: number;
+  amount: number | null; reason: string; status: 'pending' | 'approved' | 'declined';
+  requested_by_name?: string; reviewed_by_name?: string; decline_reason?: string;
+  created_at: string; reviewed_at?: string;
 }
 
 const TABS = ['All Orders', 'Awaiting Payment', 'New', 'Preparing', 'Ready', 'Completed', 'Cancelled'];
@@ -31,13 +39,15 @@ const statusMap: Record<string, string> = {
 
 export default function OrdersPage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { user } = useAuthStore();
-  // Refunding/voiding is money leaving the business — same restriction the
-  // backend already enforces (see routes/index.ts: authorize('administrator',
-  // 'manager')). Hiding the button for anyone else avoids a confusing 403
-  // toast on a click that was never going to be allowed.
+  // Both roles can start a refund, but what actually happens differs:
+  // administrators refund directly (backend: authorize('administrator') on
+  // /orders/:id/refund), while managers submit a request that sits pending
+  // until an admin approves it (see submitRefund below and the Refund
+  // Requests panel). Hiding the button entirely for anyone else avoids a
+  // confusing 403 toast on a click that was never going to be allowed.
   const canRefund = user?.role === 'administrator' || user?.role === 'manager';
+  const isAdmin = user?.role === 'administrator';
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [selected, setSelected] = useState<Order | null>(null);
@@ -52,6 +62,40 @@ export default function OrdersPage() {
   const [refundReason, setRefundReason] = useState('');
   const [refundRestock, setRefundRestock] = useState(false);
   const [refunding, setRefunding] = useState(false);
+  // Admin-only review queue for refund requests managers have submitted.
+  const [refundRequests, setRefundRequests] = useState<RefundRequest[]>([]);
+  const [showRefundRequestsPanel, setShowRefundRequestsPanel] = useState(false);
+  const [decliningRequestId, setDecliningRequestId] = useState<string | null>(null);
+  const [declineReasonInput, setDeclineReasonInput] = useState('');
+  const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
+  const [pushStatus, setPushStatus] = useState<'subscribed' | 'unsubscribed' | 'unsupported' | 'denied' | 'loading'>('loading');
+
+  useEffect(() => { if (isAdmin) getPushSubscriptionStatus().then(setPushStatus); }, [isAdmin]);
+
+  const handleTogglePush = async () => {
+    if (pushStatus === 'subscribed') {
+      await unsubscribeFromKitchenAlerts();
+      setPushStatus('unsubscribed');
+      toast.success('Refund request alerts turned off on this device');
+      return;
+    }
+    if (pushStatus === 'denied') {
+      toast.error(
+        'Notifications are blocked for this site. On Android Chrome: tap the ⓘ or 🔒 icon next to the address bar → Permissions → Notifications → Allow. Then reload this page and try again.',
+        { duration: 8000 }
+      );
+      return;
+    }
+    setPushStatus('loading');
+    const result = await subscribeToKitchenAlerts();
+    if (result.success) {
+      setPushStatus('subscribed');
+      toast.success('This device will now get a notification for every refund request');
+    } else {
+      setPushStatus(await getPushSubscriptionStatus());
+      toast.error(result.message || 'Could not enable phone alerts', { duration: 7000 });
+    }
+  };
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -68,15 +112,6 @@ export default function OrdersPage() {
 
   useEffect(() => { fetchOrders(); }, [activeTab, page, fetchOrders]);
   useEffect(() => { const t = setTimeout(fetchOrders, 400); return () => clearTimeout(t); }, [search, fetchOrders]);
-
-  useEffect(() => {
-    const openOrderId = (location.state as { openOrderId?: string } | null)?.openOrderId;
-    if (!openOrderId) return;
-    api.get(`/orders/${openOrderId}`)
-      .then(({ data }) => setSelected(data.data))
-      .catch(() => toast.error('Could not open that order'))
-      .finally(() => navigate(location.pathname, { replace: true, state: {} }));
-  }, [location.state, location.pathname, navigate]);
 
   const printReceipt = async (orderId: string) => {
     try {
@@ -129,19 +164,72 @@ export default function OrdersPage() {
     if (!selected) return;
     const amount = Number(refundAmount);
     if (!Number.isFinite(amount) || amount <= 0) { toast.error('Enter a valid refund amount'); return; }
+    if (!refundReason.trim()) { toast.error('A reason is required'); return; }
     setRefunding(true);
     try {
-      const res = await api.post(`/orders/${selected.id}/refund`, {
-        amount, reason: refundReason || undefined, restock: refundRestock,
+      // Administrators refund directly (they're the approval authority for
+      // everyone else's requests, so there's no one left to check them).
+      // Anyone else submits a request instead — no money moves until an
+      // admin explicitly approves it.
+      const endpoint = isAdmin ? `/orders/${selected.id}/refund` : `/orders/${selected.id}/refund-request`;
+      const res = await api.post(endpoint, {
+        amount, reason: refundReason.trim(), restock: refundRestock,
       });
-      toast.success(res.data.message || 'Refund issued');
+      toast.success(res.data.message || (isAdmin ? 'Refund issued' : 'Refund request submitted — awaiting admin approval'));
       setShowRefundModal(false);
       fetchOrders();
-      viewOrder({ id: selected.id } as Order);
+      if (isAdmin) viewOrder({ id: selected.id } as Order);
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Refund failed';
       toast.error(msg);
     } finally { setRefunding(false); }
+  };
+
+  // Admin-only: fetch the pending refund-request queue, and poll it so a
+  // new request shows up without needing a manual refresh. Managers never
+  // call this — they only ever see the requests they've personally
+  // submitted reflected in the order they requested it on, not the full
+  // cross-staff queue.
+  const fetchRefundRequests = useCallback(async () => {
+    if (!isAdmin) return;
+    try {
+      const { data } = await api.get('/refund-requests', { params: { status: 'pending' } });
+      setRefundRequests(data.data);
+    } catch { /* silent — this is a supplementary panel, not the main page */ }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    fetchRefundRequests();
+    const interval = setInterval(fetchRefundRequests, 30000);
+    return () => clearInterval(interval);
+  }, [fetchRefundRequests]);
+
+  const approveRequest = async (r: RefundRequest) => {
+    if (!confirm(`Approve this refund? ${formatCurrency(Number(r.amount ?? r.order_total))} will be refunded on order #${r.order_number}.`)) return;
+    setProcessingRequestId(r.id);
+    try {
+      const { data } = await api.post(`/refund-requests/${r.id}/approve`);
+      toast.success(data.message || 'Refund approved and issued');
+      fetchRefundRequests();
+      fetchOrders();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not approve';
+      toast.error(msg);
+    } finally { setProcessingRequestId(null); }
+  };
+
+  const declineRequest = async (r: RefundRequest) => {
+    setProcessingRequestId(r.id);
+    try {
+      const { data } = await api.post(`/refund-requests/${r.id}/decline`, { decline_reason: declineReasonInput.trim() || undefined });
+      toast.success(data.message || 'Refund request declined');
+      setDecliningRequestId(null);
+      setDeclineReasonInput('');
+      fetchRefundRequests();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not decline';
+      toast.error(msg);
+    } finally { setProcessingRequestId(null); }
   };
 
   const typeIcon = (type: string) => ({ dine_in: '🪑', takeaway: '🛍️', delivery: '🛵' }[type] || '🪑');
@@ -151,6 +239,29 @@ export default function OrdersPage() {
       {/* Main list */}
       <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Orders" subtitle="Manage and track all restaurant orders">
+          {isAdmin && pushStatus !== 'unsupported' && (
+            <button
+              onClick={handleTogglePush}
+              disabled={pushStatus === 'loading'}
+              title={pushStatus === 'denied' ? 'Notifications blocked — enable them in your browser/phone settings' : 'Get a phone notification the moment a manager requests a refund'}
+              className={`btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50 ${pushStatus === 'subscribed' ? 'border-status-success/40 text-status-success' : pushStatus === 'denied' ? 'border-status-warning/40 text-status-warning' : ''}`}
+            >
+              {pushStatus === 'subscribed' ? <Bell size={15} /> : <BellOff size={15} />}
+              <span className="hidden sm:inline">
+                {pushStatus === 'loading' ? 'Loading…' : pushStatus === 'denied' ? 'Alerts blocked' : pushStatus === 'subscribed' ? 'Refund alerts ON' : 'Enable refund alerts'}
+              </span>
+            </button>
+          )}
+          {isAdmin && (
+            <button onClick={() => setShowRefundRequestsPanel(true)} className="btn-secondary flex items-center gap-2 relative">
+              Refund Requests
+              {refundRequests.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-status-warning rounded-full text-[10px] font-bold flex items-center justify-center text-black">
+                  {refundRequests.length}
+                </span>
+              )}
+            </button>
+          )}
           <button onClick={() => navigate('/pos')} className="btn-primary flex items-center gap-2"><Plus size={15} /> New Order</button>
         </PageHeader>
 
@@ -325,10 +436,15 @@ export default function OrdersPage() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setShowRefundModal(false)}>
           <div className="bg-surface-card border border-border rounded-2xl p-6 w-full max-w-sm space-y-4" onClick={e => e.stopPropagation()}>
             <div>
-              <h3 className="font-bold text-lg">Refund Order #{selected.order_number}</h3>
+              <h3 className="font-bold text-lg">{isAdmin ? 'Refund' : 'Request Refund for'} Order #{selected.order_number}</h3>
               <p className="text-xs text-text-muted mt-1">
                 Paid so far: {formatCurrency(selected.amount_paid)}. A full refund of the remaining balance will void the order.
               </p>
+              {!isAdmin && (
+                <p className="text-xs text-status-warning mt-2 bg-status-warning/10 border border-status-warning/30 rounded-lg px-2.5 py-2">
+                  This won't refund anything immediately — it goes to an administrator to approve or decline first.
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-xs font-medium text-text-secondary mb-1">Refund amount (KES)</label>
@@ -340,7 +456,7 @@ export default function OrdersPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">Reason</label>
+              <label className="block text-xs font-medium text-text-secondary mb-1">Reason *</label>
               <input
                 type="text"
                 value={refundReason}
@@ -355,9 +471,75 @@ export default function OrdersPage() {
             </label>
             <div className="flex gap-2 pt-2">
               <button onClick={() => setShowRefundModal(false)} className="btn-secondary flex-1">Cancel</button>
-              <button onClick={submitRefund} disabled={refunding} className="btn-primary flex-1 text-status-error disabled:opacity-50">
-                {refunding ? 'Processing…' : 'Issue Refund'}
+              <button onClick={submitRefund} disabled={refunding || !refundReason.trim()} className="btn-primary flex-1 text-status-error disabled:opacity-50">
+                {refunding ? 'Processing…' : isAdmin ? 'Issue Refund' : 'Submit Request'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Refund Requests panel — admin review queue */}
+      {showRefundRequestsPanel && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setShowRefundRequestsPanel(false)}>
+          <div className="bg-surface-card border border-border rounded-2xl p-6 w-full max-w-lg max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-lg">Pending Refund Requests</h3>
+              <button onClick={() => setShowRefundRequestsPanel(false)} className="btn-ghost p-1"><X size={18} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-3">
+              {refundRequests.length === 0 && (
+                <p className="text-sm text-text-muted text-center py-8">No refund requests waiting on you.</p>
+              )}
+              {refundRequests.map(r => (
+                <div key={r.id} className="border border-border rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-sm">#{r.order_number}</span>
+                    <span className="font-bold text-status-error">{formatCurrency(Number(r.amount ?? r.order_total))}</span>
+                  </div>
+                  <p className="text-xs text-text-secondary">"{r.reason}"</p>
+                  <p className="text-[11px] text-text-muted">Requested by {r.requested_by_name || 'Unknown'} · {new Date(r.created_at).toLocaleString('en-KE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
+
+                  {decliningRequestId === r.id ? (
+                    <div className="space-y-2 pt-1">
+                      <input
+                        type="text" autoFocus
+                        value={declineReasonInput}
+                        onChange={e => setDeclineReasonInput(e.target.value)}
+                        placeholder="Why decline? (optional, shown to the requester)"
+                        className="input text-xs"
+                      />
+                      <div className="flex gap-2">
+                        <button onClick={() => { setDecliningRequestId(null); setDeclineReasonInput(''); }} className="btn-secondary flex-1 text-xs py-1.5">Cancel</button>
+                        <button
+                          onClick={() => declineRequest(r)}
+                          disabled={processingRequestId === r.id}
+                          className="btn-primary flex-1 text-xs py-1.5 text-status-error disabled:opacity-50"
+                        >
+                          {processingRequestId === r.id ? 'Declining…' : 'Confirm Decline'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => setDecliningRequestId(r.id)}
+                        disabled={processingRequestId === r.id}
+                        className="btn-secondary flex-1 text-xs py-1.5 disabled:opacity-50"
+                      >
+                        Decline
+                      </button>
+                      <button
+                        onClick={() => approveRequest(r)}
+                        disabled={processingRequestId === r.id}
+                        className="flex-1 text-xs py-1.5 rounded-lg bg-status-success/10 text-status-success border border-status-success/30 hover:bg-status-success/20 transition-colors disabled:opacity-50 font-medium"
+                      >
+                        {processingRequestId === r.id ? 'Approving…' : 'Approve'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         </div>
