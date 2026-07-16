@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingCart, ClipboardList, ChefHat, Table2,
   UtensilsCrossed, Package, ShoppingBag, Users, Star,
-  BarChart3, Receipt, UserSquare2, Calendar, Settings, LogOut, ChevronDown, Sun, Moon, X, Repeat
+  BarChart3, Receipt, UserSquare2, Calendar, Settings, LogOut, ChevronDown, Sun, Moon, X, Repeat, HelpCircle
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useThemeStore } from '@/store/themeStore';
@@ -36,6 +36,8 @@ const NAV: Array<{ label: string; icon: typeof LayoutDashboard; to: string } | {
   { label: 'Scheduling', icon: Calendar, to: '/scheduling' },
   { section: 'SETTINGS' },
   { label: 'Settings', icon: Settings, to: '/settings' },
+  { section: 'SUPPORT' },
+  { label: 'Help', icon: HelpCircle, to: '/help' },
 ];
 
 interface SidebarProps {

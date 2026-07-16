@@ -20,6 +20,7 @@ import ReportsPage from '@/pages/ReportsPage';
 import StaffPage from '@/pages/StaffPage';
 import SchedulingPage from '@/pages/SchedulingPage';
 import SettingsPage from '@/pages/SettingsPage';
+import HelpPage from '@/pages/HelpPage';
 import { ExpensesPage } from '@/pages/OtherPages';
 
 const queryClient = new QueryClient({
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="staff" element={<StaffPage />} />
             <Route path="scheduling" element={<SchedulingPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="help" element={<HelpPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
