@@ -402,18 +402,18 @@ export default function MenuPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-text-secondary mb-1">Price (KES) *</label>
-                <input type="number" value={formData.price} onChange={e => setFormData(p => ({...p, price: +e.target.value}))} className="input" />
+                <input type="number" value={formData.price === 0 ? '' : formData.price} onChange={e => setFormData(p => ({...p, price: e.target.value === '' ? 0 : +e.target.value}))} className="input" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-text-secondary mb-1">Cost (KES)</label>
-                <input type="number" value={formData.cost} onChange={e => setFormData(p => ({...p, cost: +e.target.value}))} className="input" />
+                <input type="number" value={formData.cost === 0 ? '' : formData.cost} onChange={e => setFormData(p => ({...p, cost: e.target.value === '' ? 0 : +e.target.value}))} className="input" />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-text-secondary mb-1">Prep Time (mins)</label>
-                <input type="number" value={formData.preparation_time} onChange={e => setFormData(p => ({...p, preparation_time: +e.target.value}))} className="input" />
+                <input type="number" value={formData.preparation_time === 0 ? '' : formData.preparation_time} onChange={e => setFormData(p => ({...p, preparation_time: e.target.value === '' ? 0 : +e.target.value}))} className="input" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-text-secondary mb-1">Status</label>

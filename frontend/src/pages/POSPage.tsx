@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Search, Scan, ShoppingCart, X, Plus, Minus,
   Trash2, ChevronDown, Phone, CheckCircle, AlertCircle, Loader,
-  Pause, Save, Banknote, Smartphone, CreditCard, Shuffle, User, Star, Pencil
+  Pause, Save, Banknote, Smartphone, CreditCard, Shuffle, User, Star, Pencil, Landmark
 } from 'lucide-react';
 import api from '@/lib/api';
 import { enqueueSale } from '@/lib/offlineSync/queue';
@@ -94,7 +94,7 @@ export default function POSPage() {
   // pre-selected — configured from Settings > POS & Payments rather than
   // fixed in code. Cash is never excluded here even if somehow misconfigured,
   // since it's the one method that always has to work.
-  const [posConfig, setPosConfig] = useState({ defaultMethod: 'Cash', enableMpesa: true, enableCard: true, enablePointsRedemption: true });
+  const [posConfig, setPosConfig] = useState({ defaultMethod: 'Cash', enableMpesa: true, enableCard: true, enableTill: true, enablePointsRedemption: true });
   const isOnline = useOnlineStatus();
   const [pointsToRedeem, setPointsToRedeem] = useState('');
 
@@ -134,7 +134,7 @@ export default function POSPage() {
   // statement. M-Pesa isn't an option here since it needs the async
   // STK-push flow (a phone number per person), which doesn't fit this
   // single confirm-and-done action.
-  const [splitPaymentMethod, setSplitPaymentMethod] = useState<'cash' | 'card'>('cash');
+  const [splitPaymentMethod, setSplitPaymentMethod] = useState<'cash' | 'card' | 'till'>('cash');
 
   /* ── Load menu ─────────────────────────────────────────────────────── */
   useEffect(() => {
@@ -219,6 +219,7 @@ export default function POSPage() {
         defaultMethod: s.pos_default_payment_method || 'Cash',
         enableMpesa: s.pos_enable_mpesa !== 'false',
         enableCard: s.pos_enable_card !== 'false',
+        enableTill: s.pos_enable_till !== 'false',
         enablePointsRedemption: s.pos_enable_points_redemption !== 'false',
       });
       if (s.pos_default_payment_method) setPaymentMethod(s.pos_default_payment_method);
@@ -331,9 +332,10 @@ export default function POSPage() {
     'Cash',
     ...(posConfig.enableMpesa && isOnline ? ['M-Pesa'] : []),
     ...(posConfig.enableCard ? ['Card'] : []),
+    ...(posConfig.enableTill ? ['Till'] : []),
     ...(isOnline ? ['Split Bill'] : []),
     ...(posConfig.enablePointsRedemption && isOnline && (selectedCustomer?.available_points || 0) > 0 ? ['Points'] : []),
-  ], [posConfig.enableMpesa, posConfig.enableCard, posConfig.enablePointsRedemption, isOnline, selectedCustomer?.available_points]);
+  ], [posConfig.enableMpesa, posConfig.enableCard, posConfig.enableTill, posConfig.enablePointsRedemption, isOnline, selectedCustomer?.available_points]);
   const maxPointsUsable = Math.min(
     selectedCustomer?.available_points || 0,
     pointValueKes > 0 ? Math.floor(balanceDueDisplay / pointValueKes) : 0
@@ -356,7 +358,7 @@ export default function POSPage() {
     return true;
   };
 
-  const createOrder = async (paymentMethodHint: 'cash' | 'card' | 'mpesa' | 'split') => {
+  const createOrder = async (paymentMethodHint: 'cash' | 'card' | 'till' | 'mpesa' | 'split') => {
     const res = await api.post('/orders', {
       type: orderType === 'Dine In' ? 'dine_in' : orderType === 'Takeaway' ? 'takeaway' : 'delivery',
       // A real table_id links this order to restaurant_tables (occupies it,
@@ -401,7 +403,7 @@ export default function POSPage() {
      Every subsequent call (a second, different-method payment on the same
      bill) returns the SAME order untouched — createOrder is only ever
      called once per sale. */
-  const ensureActiveOrder = async (methodHint: 'cash' | 'card' | 'mpesa' | 'split') => {
+  const ensureActiveOrder = async (methodHint: 'cash' | 'card' | 'till' | 'mpesa' | 'split') => {
     if (activeOrder) return activeOrder;
     const order = await createOrder(methodHint);
     const ao = {
@@ -421,9 +423,7 @@ export default function POSPage() {
      exactly what's still owed. */
   const settleAfterPayment = (order: { id: string; order_number: string; type: string; total: number }, balanceRemaining: number) => {
     if (balanceRemaining <= 0.01) {
-      toast.success(
-        order.type === 'dine_in' ? `Order #${order.order_number} sent to kitchen!` : `Order #${order.order_number} complete!`
-      );
+      toast.success(`Order #${order.order_number} sent to kitchen!`);
       printReceipt(order.id);
       setCart([]);
       setSpecialInstructions(''); setShowInstructionsInput(false);
@@ -448,7 +448,7 @@ export default function POSPage() {
      first tender for the cart. Settling decides whether that was enough to
      finish the sale or whether the balance is still open for another
      method. */
-  const payCashOrCard = async (method: 'cash' | 'card') => {
+  const payCashOrCard = async (method: 'cash' | 'card' | 'till') => {
     if (!cart.length && !activeOrder) { toast.error('Cart is empty'); return; }
     if (!activeOrder && !requireTableIfDineIn()) return;
     if (processingPayment) return; // guard against double-submit
@@ -475,7 +475,7 @@ export default function POSPage() {
      cart as a single, full Cash or Card payment, queue it, and finish the
      sale immediately from the cashier's point of view — the sync happening
      later is a background concern, not something the till should wait on. */
-  const payCashOrCardOffline = async (method: 'cash' | 'card') => {
+  const payCashOrCardOffline = async (method: 'cash' | 'card' | 'till') => {
     if (!cart.length) { toast.error('Cart is empty'); return; }
     if (activeOrder) {
       toast.error('This order already has a partial payment recorded online — reconnect to finish it rather than starting a new one offline.');
@@ -739,8 +739,8 @@ export default function POSPage() {
     if (paymentMethod === 'M-Pesa')    openMpesaModal();
     else if (paymentMethod === 'Split Bill') setShowSplitModal(true);
     else if (paymentMethod === 'Points') payWithPoints();
-    else if (!isOnline) payCashOrCardOffline(paymentMethod.toLowerCase() as 'cash' | 'card');
-    else payCashOrCard(paymentMethod.toLowerCase() as 'cash' | 'card');
+    else if (!isOnline) payCashOrCardOffline(paymentMethod.toLowerCase() as 'cash' | 'card' | 'till');
+    else payCashOrCard(paymentMethod.toLowerCase() as 'cash' | 'card' | 'till');
   };
 
   /* ─────────────────────────────────────────────────────────────────── */
@@ -1219,7 +1219,13 @@ export default function POSPage() {
           )}
 
           {/* Payment method buttons */}
-          <div className={`grid gap-2 mt-1 ${availableMethods.length <= 2 ? 'grid-cols-2' : availableMethods.length === 3 ? 'grid-cols-3' : availableMethods.length >= 5 ? 'grid-cols-5' : 'grid-cols-4'}`}>
+          <div className={`grid gap-2 mt-1 grid-cols-3 ${
+            availableMethods.length <= 2 ? 'sm:grid-cols-2'
+            : availableMethods.length === 3 ? 'sm:grid-cols-3'
+            : availableMethods.length === 5 ? 'sm:grid-cols-5'
+            : availableMethods.length === 6 ? 'sm:grid-cols-3'
+            : 'sm:grid-cols-4'
+          }`}>
             {availableMethods.map(m => (
               <button
                 key={m}
@@ -1232,7 +1238,7 @@ export default function POSPage() {
                     : 'bg-surface-50 text-text-secondary hover:text-text-primary border border-border hover:border-brand/30'
                 }`}
               >
-                {m === 'Cash' ? <Banknote size={17} /> : m === 'M-Pesa' ? <Smartphone size={17} /> : m === 'Card' ? <CreditCard size={17} /> : m === 'Points' ? <Star size={17} /> : <Shuffle size={17} />}
+                {m === 'Cash' ? <Banknote size={17} /> : m === 'M-Pesa' ? <Smartphone size={17} /> : m === 'Card' ? <CreditCard size={17} /> : m === 'Till' ? <Landmark size={17} /> : m === 'Points' ? <Star size={17} /> : <Shuffle size={17} />}
                 {m}
               </button>
             ))}
@@ -1532,8 +1538,8 @@ export default function POSPage() {
 
             <div className="mb-5">
               <p className="text-sm text-text-muted text-center mb-2">Collected as</p>
-              <div className="grid grid-cols-2 gap-2">
-                {(['cash', 'card'] as const).map(m => (
+              <div className="grid grid-cols-3 gap-2">
+                {(['cash', 'card', 'till'] as const).map(m => (
                   <button
                     key={m}
                     onClick={() => setSplitPaymentMethod(m)}
@@ -1541,8 +1547,8 @@ export default function POSPage() {
                       splitPaymentMethod === m ? 'bg-brand text-black' : 'bg-surface-50 text-text-secondary border border-border hover:text-text-primary'
                     }`}
                   >
-                    {m === 'cash' ? <Banknote size={15} /> : <CreditCard size={15} />}
-                    {m === 'cash' ? 'Cash' : 'Card'}
+                    {m === 'cash' ? <Banknote size={15} /> : m === 'card' ? <CreditCard size={15} /> : <Landmark size={15} />}
+                    {m === 'cash' ? 'Cash' : m === 'card' ? 'Card' : 'Till'}
                   </button>
                 ))}
               </div>

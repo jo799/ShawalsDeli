@@ -75,7 +75,7 @@ export default function SettingsPage() {
   // which. See the note in the General tab about what's actually wired to
   // behavior elsewhere in the app today.
   const [prefs, setPrefs] = useState({
-    auto_logout: '30 Minutes', confirm_before_delete: true, otp_login_enabled: true,
+    auto_logout: '30 Minutes', confirm_before_delete: true, otp_login_enabled: true, sms_kitchen_alerts_enabled: false,
   });
   const [business, setBusiness] = useState({
     business_name: '', business_address: '', business_email: '', business_phone: '', tax_pin: '', website: '',
@@ -86,7 +86,7 @@ export default function SettingsPage() {
   const [tableSettings, setTableSettings] = useState({ default_reservation_duration_minutes: '90', default_table_capacity: '4' });
   const [kdsSettings, setKdsSettings] = useState({ kds_refresh_interval_seconds: '30', kds_sound_alert_enabled: true });
   const [posSettings, setPosSettings] = useState({
-    pos_default_payment_method: 'Cash', pos_enable_mpesa: true, pos_enable_card: true, pos_enable_points_redemption: true,
+    pos_default_payment_method: 'Cash', pos_enable_mpesa: true, pos_enable_card: true, pos_enable_till: true, pos_enable_points_redemption: true,
   });
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
@@ -125,6 +125,7 @@ export default function SettingsPage() {
       if (s.auto_logout) setPrefs(p => ({ ...p, auto_logout: s.auto_logout }));
       if (s.confirm_before_delete !== undefined) setPrefs(p => ({ ...p, confirm_before_delete: s.confirm_before_delete === 'true' }));
       if (s.otp_login_enabled !== undefined) setPrefs(p => ({ ...p, otp_login_enabled: s.otp_login_enabled === 'true' }));
+      if (s.sms_kitchen_alerts_enabled !== undefined) setPrefs(p => ({ ...p, sms_kitchen_alerts_enabled: s.sms_kitchen_alerts_enabled === 'true' }));
       setReceiptSettings(p => ({
         receipt_footer_message: s.receipt_footer_message ?? p.receipt_footer_message,
         receipt_show_customer_name: s.receipt_show_customer_name !== undefined ? s.receipt_show_customer_name === 'true' : p.receipt_show_customer_name,
@@ -145,6 +146,7 @@ export default function SettingsPage() {
         pos_default_payment_method: s.pos_default_payment_method ?? p.pos_default_payment_method,
         pos_enable_mpesa: s.pos_enable_mpesa !== undefined ? s.pos_enable_mpesa === 'true' : p.pos_enable_mpesa,
         pos_enable_card: s.pos_enable_card !== undefined ? s.pos_enable_card === 'true' : p.pos_enable_card,
+        pos_enable_till: s.pos_enable_till !== undefined ? s.pos_enable_till === 'true' : p.pos_enable_till,
         pos_enable_points_redemption: s.pos_enable_points_redemption !== undefined ? s.pos_enable_points_redemption === 'true' : p.pos_enable_points_redemption,
       }));
     } catch { toast.error('Failed to load settings'); }
@@ -193,6 +195,7 @@ export default function SettingsPage() {
         auto_logout: prefs.auto_logout,
         confirm_before_delete: String(prefs.confirm_before_delete),
         otp_login_enabled: String(prefs.otp_login_enabled),
+        sms_kitchen_alerts_enabled: String(prefs.sms_kitchen_alerts_enabled),
         ...business,
       });
       setConfirmBeforeDelete(prefs.confirm_before_delete);
@@ -327,6 +330,14 @@ export default function SettingsPage() {
                   {prefs.otp_login_enabled && (
                     <p className="text-[11px] text-text-muted -mt-1 mb-2">
                       Sent via the same email provider used for password resets — everyone logging in will need email access at that moment. Adds a step to every login, including shift-change logins on a shared POS terminal.
+                    </p>
+                  )}
+                  <SettingRow label="SMS Kitchen Alerts" description="Text kitchen staff's phones for every new order, via Brevo">
+                    <Toggle value={prefs.sms_kitchen_alerts_enabled} onChange={v => setPrefs(p => ({ ...p, sms_kitchen_alerts_enabled: v }))} />
+                  </SettingRow>
+                  {prefs.sms_kitchen_alerts_enabled && (
+                    <p className="text-[11px] text-text-muted -mt-1 mb-2">
+                      Each SMS is a real, per-message cost through your Brevo account — this is on top of the free push notifications Kitchen Display already supports. Only sent to active staff (kitchen staff, head chef, manager, administrator) with a phone number on file.
                     </p>
                   )}
                 </div>
@@ -514,6 +525,7 @@ export default function SettingsPage() {
                     <option value="Cash">Cash</option>
                     {posSettings.pos_enable_mpesa && <option value="M-Pesa">M-Pesa</option>}
                     {posSettings.pos_enable_card && <option value="Card">Card</option>}
+                    {posSettings.pos_enable_till && <option value="Till">Till</option>}
                   </select>
                 </SettingRow>
                 <SettingRow label="Accept M-Pesa" description="Show the M-Pesa button at checkout">
@@ -522,6 +534,9 @@ export default function SettingsPage() {
                 <SettingRow label="Accept Card" description="Show the Card button at checkout">
                   <Toggle value={posSettings.pos_enable_card} onChange={v => setPosSettings(p => ({ ...p, pos_enable_card: v, pos_default_payment_method: !v && p.pos_default_payment_method === 'Card' ? 'Cash' : p.pos_default_payment_method }))} />
                 </SettingRow>
+                <SettingRow label="Accept Till" description="Show the Till button at checkout — for M-Pesa Buy Goods payments the customer sends directly to your till number, confirmed manually rather than via STK push">
+                  <Toggle value={posSettings.pos_enable_till} onChange={v => setPosSettings(p => ({ ...p, pos_enable_till: v, pos_default_payment_method: !v && p.pos_default_payment_method === 'Till' ? 'Cash' : p.pos_default_payment_method }))} />
+                </SettingRow>
                 <SettingRow label="Allow Loyalty Point Redemption" description="Let cashiers redeem a customer's points toward a bill at POS">
                   <Toggle value={posSettings.pos_enable_points_redemption} onChange={v => setPosSettings(p => ({ ...p, pos_enable_points_redemption: v }))} />
                 </SettingRow>
@@ -529,6 +544,7 @@ export default function SettingsPage() {
                   pos_default_payment_method: posSettings.pos_default_payment_method,
                   pos_enable_mpesa: String(posSettings.pos_enable_mpesa),
                   pos_enable_card: String(posSettings.pos_enable_card),
+                  pos_enable_till: String(posSettings.pos_enable_till),
                   pos_enable_points_redemption: String(posSettings.pos_enable_points_redemption),
                 }, () => {}, 'POS payment settings')} disabled={savingPanel} className="btn-primary text-sm disabled:opacity-50">
                   {savingPanel ? 'Saving…' : 'Save Payment Settings'}
