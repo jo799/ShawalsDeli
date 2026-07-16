@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Download, Printer, DollarSign, ClipboardList, UtensilsCrossed, TrendingUp } from 'lucide-react';
+import { RefreshCw, Download, Printer, DollarSign, ClipboardList, UtensilsCrossed, TrendingUp, FileSpreadsheet, ChevronDown } from 'lucide-react';
 import { AreaChart, Area, PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format } from 'date-fns';
 import api from '@/lib/api';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { formatCurrency, toLocalDateString, resolveMenuImage } from '@/lib/utils';
 import { LoadingPage } from '@/components/ui';
-import ReportPrint from '@/components/ReportPrintDocument';
 import toast from 'react-hot-toast';
 
 const COLORS = ['#F59E0B','#10B981','#3B82F6','#8B5CF6','#EF4444'];
@@ -48,9 +47,10 @@ export default function ReportsPage() {
   const isOnline = useOnlineStatus();
   const [tab, setTab] = useState<'Daily' | 'Weekly' | 'Monthly'>('Daily');
   const [date, setDate] = useState(toLocalDateString());
+  const [showSalesExportMenu, setShowSalesExportMenu] = useState(false);
+  const [exportingPeriod, setExportingPeriod] = useState<string | null>(null);
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [printReady, setPrintReady] = useState(false);
 
   // The tab used to be entirely cosmetic — clicking Weekly or Monthly just
   // silently re-fetched the exact same single-day report a second time.
@@ -89,18 +89,31 @@ export default function ReportsPage() {
   })) || [];
 
   const peakPoint = data?.trend.reduce((max, h) => h.sales > (max?.sales || 0) ? h : max, data.trend[0]);
-  const [startDate, endDate] = getRange();
 
-  const handlePrint = () => {
-    if (!data) {
-      toast.error('No report data to print');
-      return;
+  // Downloads the real .xlsx the backend generates — line-item sales detail
+  // plus a summary-by-item sheet. Fetched as a blob (not a plain <a href>
+  // link) because this app authenticates via a bearer token in a request
+  // header, not a cookie — a direct link to the endpoint would hit it with
+  // no credentials at all and just get a 401.
+  const downloadSalesReport = async (period: 'today' | 'week' | 'month' | 'year') => {
+    setExportingPeriod(period);
+    setShowSalesExportMenu(false);
+    try {
+      const periodParam = period === 'today' ? 'day' : period;
+      const res = await api.get('/reports/sales-export', { params: { period: periodParam }, responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sales-report-${period}-${toLocalDateString()}.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Sales report downloaded');
+    } catch {
+      toast.error('Could not generate the sales report');
+    } finally {
+      setExportingPeriod(null);
     }
-    if (!printReady) {
-      toast.error('Preparing report for print — try again in a moment');
-      return;
-    }
-    window.print();
   };
 
   const exportCsv = () => {
@@ -149,8 +162,33 @@ export default function ReportsPage() {
         <div className="flex items-center gap-2">
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input text-xs py-1.5 w-42" />
           <button onClick={fetchReport} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5"><RefreshCw size={12} /> Refresh</button>
+          <div className="relative">
+            <button
+              onClick={() => setShowSalesExportMenu(v => !v)}
+              disabled={exportingPeriod !== null}
+              className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 disabled:opacity-50"
+            >
+              <FileSpreadsheet size={12} /> {exportingPeriod ? 'Generating…' : 'Sales Items'} <ChevronDown size={12} />
+            </button>
+            {showSalesExportMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowSalesExportMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 w-44 bg-surface-card border border-border rounded-lg shadow-lg z-20 py-1">
+                  {([['today', 'Today'], ['week', 'This Week'], ['month', 'This Month'], ['year', 'This Year']] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      onClick={() => downloadSalesReport(value)}
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-surface-50 text-text-secondary hover:text-text-primary transition-colors"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <button onClick={exportCsv} disabled={!data} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 disabled:opacity-50"><Download size={12} /> Export</button>
-          <button onClick={handlePrint} disabled={!data || !printReady} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 disabled:opacity-50"><Printer size={12} /> Print</button>
+          <button onClick={() => window.print()} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5"><Printer size={12} /> Print</button>
         </div>
       </div>
 
@@ -366,15 +404,6 @@ export default function ReportsPage() {
           </p>
         </>
       ) : null}
-
-      <ReportPrint
-        data={data}
-        tab={tab}
-        startDate={startDate}
-        endDate={endDate}
-        periodLabel={periodLabel}
-        onReadyChange={setPrintReady}
-      />
     </div>
   );
 }
