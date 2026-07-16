@@ -71,7 +71,7 @@ export const getStatusColor = (status: string): string => {
     active: 'success', completed: 'success', received: 'success', approved: 'success', available: 'success', in_stock: 'success',
     new: 'info', pending: 'warning', preparing: 'warning', partially_received: 'warning', on_leave: 'warning', reserved: 'warning', low_stock: 'warning', awaiting_payment: 'warning',
     cancelled: 'error', failed: 'error', out_of_stock: 'error', inactive: 'error', declined: 'error', expired: 'error', archived: 'muted',
-    ready: 'purple', gold: 'warning', silver: 'muted', bronze: 'muted',
+    ready: 'purple', gold: 'warning', silver: 'muted', bronze: 'muted', refunded: 'purple',
     occupied: 'error', cleaning: 'purple',
   };
   return map[status?.toLowerCase()] || 'muted';

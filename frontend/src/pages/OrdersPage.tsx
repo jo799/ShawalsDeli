@@ -17,6 +17,8 @@ interface Order {
   items?: Array<{ item_name: string; quantity: number; unit_price: number; total_price: number }>;
   subtotal?: number;
   served_by_name?: string; prepared_by_name?: string;
+  has_refund?: boolean; // present on list rows
+  refunds?: Array<{ id: string; amount: number; reason: string | null; created_at: string }>; // present on the detail fetch
 }
 
 interface RefundRequest {
@@ -233,6 +235,17 @@ export default function OrdersPage() {
     } finally { setProcessingRequestId(null); }
   };
 
+  // The backend stores a full refund as status='cancelled' (same value as a
+  // plain, never-paid cancellation) — cleanly reusing an existing status
+  // rather than adding a new enum value the rest of the system would need
+  // to account for everywhere it checks for 'cancelled'. That's the right
+  // call for the data model, but it means the two cases were showing up
+  // identically in the UI with no way to tell them apart. This is purely a
+  // display-layer fix: a cancelled order with an associated refund record
+  // shows as "Refunded" instead, without touching what's actually stored.
+  const orderDisplayStatus = (order: Order): string =>
+    order.status === 'cancelled' && (order.has_refund || (order.refunds?.length ?? 0) > 0) ? 'refunded' : order.status;
+
   const typeIcon = (type: string) => ({ dine_in: '🪑', takeaway: '🛍️', delivery: '🛵' }[type] || '🪑');
 
   return (
@@ -310,7 +323,7 @@ export default function OrdersPage() {
                     </td>
                     <td className="table-cell">{order.table_number || '—'}</td>
                     <td className="table-cell">{order.customer_full_name || order.customer_name || 'Walk-in'}</td>
-                    <td className="table-cell"><StatusBadge status={order.status} /></td>
+                    <td className="table-cell"><StatusBadge status={orderDisplayStatus(order)} /></td>
                     <td className="table-cell font-medium">{formatCurrency(order.total)}</td>
                     <td className="table-cell">
                       <span className="text-xs text-text-muted">
@@ -337,7 +350,7 @@ export default function OrdersPage() {
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <h2 className="font-bold">Order #{selected.order_number}</h2>
-                <StatusBadge status={selected.status} />
+                <StatusBadge status={orderDisplayStatus(selected)} />
               </div>
               <div className="flex items-center gap-3 text-xs text-text-muted">
                 <span>🪑 {selected.type?.replace('_', ' ')}</span>
@@ -370,6 +383,23 @@ export default function OrdersPage() {
                     <p className="text-sm">{selected.prepared_by_name}</p>
                   </div>
                 )}
+              </div>
+            )}
+
+            {(selected.refunds?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-xs text-text-muted mb-2">Refund History</p>
+                <div className="space-y-2">
+                  {selected.refunds!.map(r => (
+                    <div key={r.id} className="bg-status-purple/5 border border-status-purple/20 rounded-lg px-3 py-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-sm text-status-purple">{formatCurrency(Number(r.amount))}</span>
+                        <span className="text-[11px] text-text-muted">{formatTime(r.created_at)}</span>
+                      </div>
+                      {r.reason && <p className="text-xs text-text-secondary mt-0.5">"{r.reason}"</p>}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
