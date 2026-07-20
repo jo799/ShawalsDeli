@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { formatCurrency } from '@/lib/utils';
 import api from '@/lib/api';
 
@@ -29,33 +29,37 @@ export default function Receipt({ order }: { order: Record<string, unknown> | nu
   // on every page load, since a receipt render is already a rare, deliberate
   // moment (checkout completing, or a manual reprint).
   const [settings, setSettings] = useState<Record<string, string>>({});
-  const [settingsReady, setSettingsReady] = useState(false);
-  const printedFor = useRef<Record<string, unknown> | null>(null);
 
+  // Runs the whole "fetch settings, then print" sequence as one self-
+  // contained effect per order, instead of two effects coordinating through
+  // shared settingsReady/printedFor state. That split design had a real
+  // race: React commits `order` changing before the settings-fetch effect's
+  // setSettingsReady(false) call actually takes effect, so on the very next
+  // render the print-effect could still see the PREVIOUS order's
+  // settingsReady=true and fire immediately — consuming the one signal that
+  // was meant to gate the real, current fetch. The first print in a session
+  // never showed this, since settingsReady starts at false with nothing
+  // stale to race against; every print after that inherited leftover state
+  // from the one before it.
+  //
+  // `cancelled` (a local closure variable, not shared state) is what
+  // correctly handles a new order arriving before this fetch settles — the
+  // cleanup function flips it, so a stale response for an order that's no
+  // longer current can't fire window.print() after the fact.
   useEffect(() => {
-    if (!order) { setSettingsReady(false); return; }
-    setSettingsReady(false);
+    if (!order) return;
+    let cancelled = false;
     api.get('/settings')
-      .then(r => setSettings(r.data.data))
+      .then(r => { if (!cancelled) setSettings(r.data.data); })
       .catch(() => { /* fall back to defaults below rather than block printing forever */ })
-      .finally(() => setSettingsReady(true));
+      .finally(() => {
+        if (cancelled) return;
+        // Small delay so React actually paints the freshly-set settings
+        // into the DOM before the browser's print dialog captures the page.
+        setTimeout(() => { if (!cancelled) window.print(); }, 50);
+      });
+    return () => { cancelled = true; };
   }, [order]);
-
-  // Printing used to be the CALLER's job (POSPage/OrdersPage each ran their
-  // own `setTimeout(() => window.print(), 150)` the moment `order` was set)
-  // — a blind guess at how long the settings fetch above would take. On
-  // anything slower than a fast local connection, 150ms often wasn't
-  // enough: window.print() fired before the business name/logo had loaded,
-  // silently printing the fallback text with no logo even when one was
-  // configured. Printing now happens here instead, gated on settingsReady,
-  // so it can only fire once the real data (or a definitive failure) is in.
-  useEffect(() => {
-    if (order && settingsReady && printedFor.current !== order) {
-      printedFor.current = order;
-      const t = setTimeout(() => window.print(), 50);
-      return () => clearTimeout(t);
-    }
-  }, [order, settingsReady]);
 
   const businessName = settings.business_name || "Shawal's Deli";
   const businessPhone = settings.business_phone;
