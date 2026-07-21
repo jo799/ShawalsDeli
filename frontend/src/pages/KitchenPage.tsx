@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ChefHat, Volume2, VolumeX, Maximize2, RefreshCw, CheckCircle, ShoppingCart, Flame, CheckCheck, Timer, Pencil, Bell, BellOff, UserCheck } from 'lucide-react';
+import { ChefHat, Volume2, VolumeX, Maximize2, RefreshCw, CheckCircle, ShoppingCart, Flame, CheckCheck, Timer, Pencil, Bell, BellOff, UserCheck, UserPlus, X } from 'lucide-react';
 import api from '@/lib/api';
 import { formatTime, toLocalDateString } from '@/lib/utils';
 import { getPushSubscriptionStatus, subscribeToKitchenAlerts, unsubscribeFromKitchenAlerts } from '@/lib/pushNotifications';
+import { useAuthStore } from '@/store/authStore';
 import toast from 'react-hot-toast';
 
 interface Order {
@@ -14,6 +15,8 @@ interface Order {
   prepared_by_name?: string;
   items?: Array<{ item_name: string; quantity: number }>;
 }
+
+interface Chef { id: string; full_name: string; role: string; }
 
 const typeIcon = (type: string) => ({ dine_in: '🪑', takeaway: '🛍️', delivery: '🛵' }[type] || '🪑');
 
@@ -30,7 +33,14 @@ const formatMinutesToServe = (mins: number): string => {
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
 };
 
-function OrderCard({ order, onAction, compact }: { order: Order; onAction: (id: string, status: string) => void; compact?: boolean }) {
+function OrderCard({
+  order, onAction, compact, isAdmin, chefs, assigningOrderId, onOpenAssign, onCloseAssign, onAssign, assignBusy,
+}: {
+  order: Order; onAction: (id: string, status: string) => void; compact?: boolean;
+  isAdmin: boolean; chefs: Chef[]; assigningOrderId: string | null;
+  onOpenAssign: (orderId: string) => void; onCloseAssign: () => void;
+  onAssign: (orderId: string, chefId: string) => void; assignBusy: boolean;
+}) {
   const mins = minutesSince(order.created_at);
   const isUrgent = mins > 20 && order.status === 'preparing';
   // "Prep time"/"Ready time" specifically mean time spent in that status —
@@ -87,12 +97,51 @@ function OrderCard({ order, onAction, compact }: { order: Order; onAction: (id: 
       )}
 
       {order.status === 'new' && (
-        <button
-          onClick={() => onAction(order.id, 'preparing')}
-          className="w-full btn-primary py-1.5 text-xs"
-        >
-          Start Preparing
-        </button>
+        <div className="space-y-1.5">
+          {/* Whoever it's assigned to shows for everyone, not just admins —
+              a chef glancing at the board should be able to tell at a
+              glance whether this one's already someone else's. Only the
+              controls to actually change the assignment are admin-gated. */}
+          {order.prepared_by_name ? (
+            <div className="flex items-center justify-between gap-1 text-[11px] text-text-muted bg-surface-50 rounded-lg px-2 py-1.5">
+              <span className="flex items-center gap-1 min-w-0">
+                <UserCheck size={11} className="shrink-0" /> <span className="truncate">Assigned to {order.prepared_by_name}</span>
+              </span>
+              {isAdmin && (
+                <button onClick={() => onOpenAssign(order.id)} className="text-brand hover:text-brand-400 font-medium shrink-0">Reassign</button>
+              )}
+            </div>
+          ) : isAdmin ? (
+            assigningOrderId === order.id ? (
+              <div className="flex items-center gap-1.5">
+                <select
+                  autoFocus
+                  disabled={assignBusy}
+                  onChange={e => { if (e.target.value) onAssign(order.id, e.target.value); }}
+                  defaultValue=""
+                  className="select text-[11px] py-1 flex-1 disabled:opacity-50"
+                >
+                  <option value="" disabled>Select a chef…</option>
+                  {chefs.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
+                </select>
+                <button onClick={onCloseAssign} className="btn-ghost p-1 shrink-0"><X size={12} /></button>
+              </div>
+            ) : (
+              <button
+                onClick={() => onOpenAssign(order.id)}
+                className="w-full flex items-center justify-center gap-1.5 text-[11px] text-brand hover:text-brand-400 border border-dashed border-border rounded-lg py-1.5 transition-colors"
+              >
+                <UserPlus size={12} /> Assign to chef
+              </button>
+            )
+          ) : null}
+          <button
+            onClick={() => onAction(order.id, 'preparing')}
+            className="w-full btn-primary py-1.5 text-xs"
+          >
+            Start Preparing
+          </button>
+        </div>
       )}
       {order.status === 'preparing' && (
         <div className="space-y-1.5">
@@ -155,6 +204,11 @@ export default function KitchenPage() {
   const [soundUnlocked, setSoundUnlocked] = useState(false);
   const knownOrderIds = useRef<Set<string> | null>(null);
   const [pushStatus, setPushStatus] = useState<'subscribed' | 'unsubscribed' | 'unsupported' | 'denied' | 'loading'>('loading');
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === 'administrator';
+  const [chefs, setChefs] = useState<Chef[]>([]);
+  const [assigningOrderId, setAssigningOrderId] = useState<string | null>(null);
+  const [assignBusy, setAssignBusy] = useState(false);
 
   useEffect(() => { getPushSubscriptionStatus().then(setPushStatus); }, []);
 
@@ -353,6 +407,33 @@ export default function KitchenPage() {
     }
   };
 
+  // Reuses the existing /staff endpoint (already returns full_name/role,
+  // already admin/manager-authorized) rather than standing up a dedicated
+  // one — fetched with a generous limit and filtered client-side to the two
+  // genuine kitchen roles, since /staff's role filter only accepts one
+  // value at a time and a chef could reasonably be either.
+  useEffect(() => {
+    if (!isAdmin) return;
+    api.get('/staff', { params: { limit: 100 } })
+      .then(r => setChefs((r.data.data as Chef[]).filter(u => u.role === 'kitchen_staff' || u.role === 'head_chef')))
+      .catch(() => { /* non-critical — assignment UI just won't have anyone to pick if this fails */ });
+  }, [isAdmin]);
+
+  const handleAssign = async (orderId: string, chefId: string) => {
+    setAssignBusy(true);
+    try {
+      const { data } = await api.post(`/orders/${orderId}/assign-chef`, { chef_id: chefId });
+      toast.success(data.message || 'Order assigned');
+      setAssigningOrderId(null);
+      fetchOrders();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not assign this order';
+      toast.error(msg, { duration: 6000 });
+    } finally {
+      setAssignBusy(false);
+    }
+  };
+
   const newOrders = orders.filter(o => o.status === 'new');
   const preparingOrders = orders.filter(o => o.status === 'preparing');
   const readyOrders = orders.filter(o => o.status === 'ready');
@@ -451,7 +532,7 @@ export default function KitchenPage() {
             ) : newOrders.length === 0 ? (
               <div className="text-center py-8 text-text-muted text-sm">No new orders</div>
             ) : newOrders.map(order => (
-              <OrderCard key={order.id} order={order} onAction={handleAction} />
+              <OrderCard key={order.id} order={order} onAction={handleAction} isAdmin={isAdmin} chefs={chefs} assigningOrderId={assigningOrderId} onOpenAssign={setAssigningOrderId} onCloseAssign={() => setAssigningOrderId(null)} onAssign={handleAssign} assignBusy={assignBusy} />
             ))}
           </div>
         </div>
@@ -470,7 +551,7 @@ export default function KitchenPage() {
             {preparingOrders.length === 0 ? (
               <div className="text-center py-8 text-text-muted text-sm">No orders preparing</div>
             ) : preparingOrders.map(order => (
-              <OrderCard key={order.id} order={order} onAction={handleAction} />
+              <OrderCard key={order.id} order={order} onAction={handleAction} isAdmin={isAdmin} chefs={chefs} assigningOrderId={assigningOrderId} onOpenAssign={setAssigningOrderId} onCloseAssign={() => setAssigningOrderId(null)} onAssign={handleAssign} assignBusy={assignBusy} />
             ))}
           </div>
         </div>
@@ -489,7 +570,7 @@ export default function KitchenPage() {
             {readyOrders.length === 0 ? (
               <div className="text-center py-8 text-text-muted text-sm">No orders ready</div>
             ) : readyOrders.map(order => (
-              <OrderCard key={order.id} order={order} onAction={handleAction} />
+              <OrderCard key={order.id} order={order} onAction={handleAction} isAdmin={isAdmin} chefs={chefs} assigningOrderId={assigningOrderId} onOpenAssign={setAssigningOrderId} onCloseAssign={() => setAssigningOrderId(null)} onAssign={handleAssign} assignBusy={assignBusy} />
             ))}
           </div>
         </div>

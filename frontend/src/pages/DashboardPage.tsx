@@ -37,6 +37,9 @@ interface DashStats {
   unavailable_menu_items: number;
   pending_orders: number;
   avg_order_value: number;
+  gross_profit: number;
+  total_expenses: number;
+  net_profit: number;
 }
 
 interface RecentOrder {
@@ -47,7 +50,7 @@ interface RecentOrder {
 
 export default function DashboardPage() {
   const isOnline = useOnlineStatus();
-  const [stats, setStats] = useState<DashStats>({ today_sales: 0, today_orders: 0, active_customers: 0, low_stock_items: 0, unavailable_menu_items: 0, pending_orders: 0, avg_order_value: 0 });
+  const [stats, setStats] = useState<DashStats>({ today_sales: 0, today_orders: 0, active_customers: 0, low_stock_items: 0, unavailable_menu_items: 0, pending_orders: 0, avg_order_value: 0, gross_profit: 0, total_expenses: 0, net_profit: 0 });
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [salesData, setSalesData] = useState<Array<{hour: string; Sales: number; Orders: number}>>([]);
   const [categoryData, setCategoryData] = useState<Array<{name: string; value: number}>>([]);
@@ -75,6 +78,9 @@ export default function DashboardPage() {
             unavailable_menu_items: unavailableRes.data.pagination?.total || 0,
             pending_orders: ordersRes.data.data?.filter((o: RecentOrder) => ['new','preparing'].includes(o.status)).length || 0,
             avg_order_value: rep.summary?.avg_order_value || 0,
+            gross_profit: rep.summary?.gross_profit || 0,
+            total_expenses: rep.summary?.total_expenses || 0,
+            net_profit: rep.summary?.net_profit || 0,
           });
           const hourly = rep.hourly?.map((h: {hour:number;sales:number;orders:number}) => ({
             hour: `${String(h.hour).padStart(2,'0')}:00`,
@@ -276,8 +282,9 @@ export default function DashboardPage() {
             <div className="space-y-2.5">
               {[
                 { label: 'Total Sales', value: formatCurrency(stats.today_sales), color: 'text-brand' },
-                { label: 'Net Revenue', value: formatCurrency(stats.today_sales * 0.84), color: 'text-status-success' },
-                { label: 'Gross Profit (41%)', value: formatCurrency(stats.today_sales * 0.41), color: 'text-status-success' },
+                { label: 'Gross Profit', value: formatCurrency(stats.gross_profit), color: 'text-status-success' },
+                { label: 'Expenses Today', value: formatCurrency(stats.total_expenses), color: 'text-status-error' },
+                { label: 'Net Profit', value: formatCurrency(stats.net_profit), color: stats.net_profit >= 0 ? 'text-status-success' : 'text-status-error' },
               ].map(row => (
                 <div key={row.label} className="flex justify-between items-center">
                   <span className="text-xs text-text-muted">{row.label}</span>

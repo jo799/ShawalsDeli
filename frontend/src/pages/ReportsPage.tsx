@@ -11,8 +11,8 @@ import toast from 'react-hot-toast';
 const COLORS = ['#F59E0B','#10B981','#3B82F6','#8B5CF6','#EF4444'];
 
 interface ReportData {
-  summary: { total_sales: number; total_orders: number; avg_order_value: number; total_discounts: number; net_sales: number; cogs: number; gross_profit: number; gross_profit_margin: number };
-  comparison: { total_sales_change_pct: number | null; total_orders_change_pct: number | null; avg_order_value_change_pct: number | null; gross_profit_change_pct: number | null };
+  summary: { total_sales: number; total_orders: number; avg_order_value: number; total_discounts: number; net_sales: number; cogs: number; gross_profit: number; gross_profit_margin: number; total_expenses: number; net_profit: number; net_profit_margin: number };
+  comparison: { total_sales_change_pct: number | null; total_orders_change_pct: number | null; avg_order_value_change_pct: number | null; gross_profit_change_pct: number | null; net_profit_change_pct: number | null };
   by_category: Array<{ category: string; sales: number; qty: number }>;
   by_payment: Array<{ payment_method: string; amount: number; count: number }>;
   top_items: Array<{ item_name: string; qty_sold: number; sales: number; profit_margin: number; image_url?: string }>;
@@ -131,6 +131,9 @@ export default function ReportsPage() {
       ['COGS', String(data.summary.cogs)],
       ['Gross Profit', String(data.summary.gross_profit)],
       ['Gross Profit Margin %', String(data.summary.gross_profit_margin)],
+      ['Total Expenses', String(data.summary.total_expenses)],
+      ['Net Profit', String(data.summary.net_profit)],
+      ['Net Profit Margin %', String(data.summary.net_profit_margin)],
       [],
       ['Sales by Category'], ['Category', 'Sales', 'Qty'],
       ...categoryData.map(c => [c.category, String(c.sales), String(c.qty)]),
@@ -208,12 +211,13 @@ export default function ReportsPage() {
               equivalent previous period (yesterday / last week / last
               month), not the fixed "+18%" style figures every card used to
               show regardless of what actually happened. */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
             {[
               { label: 'Total Sales', value: formatCurrency(data.summary.total_sales), Icon: DollarSign, pct: data.comparison.total_sales_change_pct },
               { label: 'Orders', value: data.summary.total_orders, Icon: ClipboardList, pct: data.comparison.total_orders_change_pct },
               { label: 'Avg Order Value', value: formatCurrency(data.summary.avg_order_value), Icon: UtensilsCrossed, pct: data.comparison.avg_order_value_change_pct },
               { label: 'Gross Profit', value: formatCurrency(data.summary.gross_profit), Icon: TrendingUp, pct: data.comparison.gross_profit_change_pct },
+              { label: 'Net Profit', value: formatCurrency(data.summary.net_profit), Icon: TrendingUp, pct: data.comparison.net_profit_change_pct },
             ].map(card => (
               <div key={card.label} className="card p-4">
                 <div className="flex items-start justify-between mb-3">
@@ -348,6 +352,9 @@ export default function ReportsPage() {
                   { label: 'COGS', value: `-${formatCurrency(data.summary.cogs)}`, color: 'text-status-error' },
                   { label: 'Gross Profit', value: formatCurrency(data.summary.gross_profit), color: 'text-status-success' },
                   { label: 'Gross Profit Margin', value: `${data.summary.gross_profit_margin}%`, color: 'text-text-primary' },
+                  { label: 'Operating Expenses', value: `-${formatCurrency(data.summary.total_expenses)}`, color: 'text-status-error' },
+                  { label: 'Net Profit', value: formatCurrency(data.summary.net_profit), color: data.summary.net_profit >= 0 ? 'text-status-success' : 'text-status-error' },
+                  { label: 'Net Profit Margin', value: `${data.summary.net_profit_margin}%`, color: 'text-text-primary' },
                 ].map(row => (
                   <div key={row.label} className="flex justify-between text-sm">
                     <span className="text-text-muted">{row.label}</span>
