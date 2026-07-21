@@ -13,6 +13,7 @@ import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, resolveMenuImage, menuImagePlaceholder } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import Receipt from '@/components/Receipt';
+import { loadStripeTerminal, type Terminal, type Reader } from '@stripe/terminal-js';
 
 interface MenuItem  { id: string; name: string; price: number; category_name: string; image_url?: string; tags?: string[]; track_stock?: boolean; stock_quantity?: number; reorder_level?: number; status?: string; }
 interface CartItem  extends MenuItem { quantity: number; }
@@ -25,6 +26,7 @@ interface HeldOrder {
 }
 
 type MpesaStatus = 'idle' | 'sending' | 'waiting' | 'completed' | 'failed' | 'cancelled';
+type CardStatus = 'idle' | 'initializing' | 'discovering' | 'connecting' | 'creating_intent' | 'waiting_for_card' | 'processing' | 'completed' | 'failed' | 'not_configured';
 
 const ORDER_TYPES     = ['Dine In', 'Takeaway', 'Delivery'];
 
@@ -122,6 +124,18 @@ export default function POSPage() {
   const [mpesaStatus,       setMpesaStatus]       = useState<MpesaStatus>('idle');
   const [checkoutRequestId, setCheckoutRequestId] = useState('');
   const [currentOrderId,    setCurrentOrderId]    = useState('');
+
+  /* Stripe Terminal (card reader) — the SDK instance and its connected
+     reader persist across payments via refs, rather than being
+     rediscovered and reconnected every single time "Card" is tapped. Once
+     a reader is connected for this browser tab, it stays connected for
+     the rest of the shift. */
+  const [showCardModal, setShowCardModal] = useState(false);
+  const [cardStatus, setCardStatus] = useState<CardStatus>('idle');
+  const [cardError, setCardError] = useState('');
+  const [connectedReaderLabel, setConnectedReaderLabel] = useState('');
+  const stripeTerminalRef = useRef<Terminal | null>(null);
+  const cardPaymentIntentIdRef = useRef<string>('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   /* Split bill */
@@ -331,7 +345,7 @@ export default function POSPage() {
   const availableMethods = useMemo(() => [
     'Cash',
     ...(posConfig.enableMpesa && isOnline ? ['M-Pesa'] : []),
-    ...(posConfig.enableCard ? ['Card'] : []),
+    ...(posConfig.enableCard && isOnline ? ['Card'] : []),
     ...(posConfig.enableTill ? ['Till'] : []),
     ...(isOnline ? ['Split Bill'] : []),
     ...(posConfig.enablePointsRedemption && isOnline && (selectedCustomer?.available_points || 0) > 0 ? ['Points'] : []),
@@ -669,6 +683,119 @@ export default function POSPage() {
     }
   };
 
+  /* ── Stripe Terminal (card reader) ─────────────────────────────────────
+     Unlike M-Pesa (backend-initiated, customer's phone prompts them,
+     Safaricom calls back later), the reader interaction is driven directly
+     from this browser tab via Stripe's own SDK: discover a reader, connect
+     to it, collect the card, process the payment — all synchronous from
+     the cashier's point of view. The backend's role is narrower here: hand
+     out a connection token so the SDK can authenticate, create the
+     PaymentIntent, and independently verify with Stripe that it actually
+     succeeded before applying anything (see confirmCardPayment on the
+     backend — it never just trusts this call's own report). */
+  const ensureStripeTerminal = async (): Promise<Terminal> => {
+    if (stripeTerminalRef.current) return stripeTerminalRef.current;
+
+    const { data } = await api.get('/stripe/config');
+    const stripeTerminalJs = await loadStripeTerminal();
+    if (!stripeTerminalJs) throw new Error('Could not load the Stripe Terminal SDK — check your internet connection.');
+
+    const terminal = stripeTerminalJs.create({
+      onFetchConnectionToken: async () => {
+        const res = await api.post('/stripe/connection-token');
+        return res.data.data.secret;
+      },
+      onUnexpectedReaderDisconnect: () => {
+        stripeTerminalRef.current = null;
+        setConnectedReaderLabel('');
+        toast.error('The card reader disconnected unexpectedly. Reconnect before taking another card payment.');
+      },
+    });
+    stripeTerminalRef.current = terminal;
+
+    setCardStatus('discovering');
+    // A live/production Stripe key discovers real physical readers on the
+    // network; a test key discovers Stripe's own simulated reader instead
+    // — this is what lets the whole software path (discover → connect →
+    // collect → process) be verified end to end before ever buying
+    // physical hardware.
+    const discoverResult = await terminal.discoverReaders({ location: data.data.location_id, simulated: !data.data.live_mode });
+    if ('error' in discoverResult) throw new Error(discoverResult.error.message);
+    if (discoverResult.discoveredReaders.length === 0) {
+      throw new Error(data.data.live_mode
+        ? 'No card reader found. Make sure it\'s powered on and connected to the same network.'
+        : 'No simulated reader found — this is unexpected in test mode. Check your Stripe Terminal location is set up correctly.');
+    }
+
+    setCardStatus('connecting');
+    const connectResult = await terminal.connectReader(discoverResult.discoveredReaders[0]);
+    if ('error' in connectResult) throw new Error(connectResult.error.message);
+
+    setConnectedReaderLabel(connectResult.reader.label || connectResult.reader.id);
+    return terminal;
+  };
+
+  const openCardModal = () => {
+    if (!cart.length && !activeOrder) { toast.error('Cart is empty'); return; }
+    if (!activeOrder && !requireTableIfDineIn()) return;
+    setCardError('');
+    setCardStatus('idle');
+    setShowCardModal(true);
+    runCardPayment();
+  };
+
+  const runCardPayment = async () => {
+    setCardError('');
+    try {
+      setCardStatus(stripeTerminalRef.current ? 'creating_intent' : 'initializing');
+      const terminal = await ensureStripeTerminal();
+
+      const order = await ensureActiveOrder('card');
+      const balanceDue = Math.max(0, Math.round((order.total - order.amount_paid) * 100) / 100);
+      const amount = tenderAmount ? Math.min(Number(tenderAmount), balanceDue) : balanceDue;
+      if (!(amount > 0)) { setCardStatus('failed'); setCardError('Enter an amount to charge'); return; }
+
+      setCardStatus('creating_intent');
+      const intentRes = await api.post('/stripe/create-payment-intent', { order_id: order.id, amount, award_loyalty: awardLoyalty });
+      const { client_secret, payment_intent_id } = intentRes.data.data;
+      cardPaymentIntentIdRef.current = payment_intent_id;
+
+      setCardStatus('waiting_for_card');
+      const collectResult = await terminal.collectPaymentMethod(client_secret);
+      if ('error' in collectResult) throw new Error(collectResult.error.message);
+
+      setCardStatus('processing');
+      const processResult = await terminal.processPayment(collectResult.paymentIntent);
+      if ('error' in processResult) throw new Error(processResult.error.message);
+
+      const confirmRes = await api.post('/stripe/confirm-payment', { payment_intent_id });
+      setCardStatus('completed');
+      if (confirmRes.data.points_awarded > 0) toast.success(`+${confirmRes.data.points_awarded} loyalty points earned`, { icon: '⭐' });
+      setTimeout(() => {
+        setShowCardModal(false);
+        settleAfterPayment(order, confirmRes.data.balance_remaining);
+      }, 1200);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message
+        || (e instanceof Error ? e.message : 'Card payment failed');
+      setCardStatus(msg.includes('STRIPE_') || msg.includes('not configured') ? 'not_configured' : 'failed');
+      setCardError(msg);
+    }
+  };
+
+  const cancelCardPayment = async () => {
+    if (cardPaymentIntentIdRef.current) {
+      try { await api.post('/stripe/cancel-payment-intent', { payment_intent_id: cardPaymentIntentIdRef.current }); }
+      catch { /* best-effort — the payment row will still show as failed/pending for manual review */ }
+    }
+    if (stripeTerminalRef.current?.getPaymentStatus() === 'waiting_for_input') {
+      try { await stripeTerminalRef.current.cancelCollectPaymentMethod(); } catch { /* reader may already have moved on */ }
+    }
+    setShowCardModal(false);
+    setCardStatus('idle');
+    cardPaymentIntentIdRef.current = '';
+  };
+
   /* ── Held order actions: hold, save-as-draft, resume, discard ──────────
      A held order is a suspended cart, not a real order — nothing here
      touches inventory, the kitchen, or table occupancy. "Hold Order" parks
@@ -737,6 +864,7 @@ export default function POSPage() {
     if (!cart.length && !activeOrder) { toast.error('Cart is empty'); return; }
     if (!activeOrder && !requireTableIfDineIn()) return;
     if (paymentMethod === 'M-Pesa')    openMpesaModal();
+    else if (paymentMethod === 'Card') openCardModal();
     else if (paymentMethod === 'Split Bill') setShowSplitModal(true);
     else if (paymentMethod === 'Points') payWithPoints();
     else if (!isOnline) payCashOrCardOffline(paymentMethod.toLowerCase() as 'cash' | 'card' | 'till');
@@ -1500,6 +1628,97 @@ export default function POSPage() {
         </div>
       )}
 
+      {/* ══════════════ Stripe Card Reader Modal ══════════════ */}
+      {showCardModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-surface-card border border-border rounded-2xl shadow-modal w-full max-w-sm">
+            <div className="p-5 border-b border-border flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-brand/10 rounded-xl flex items-center justify-center text-brand"><CreditCard size={18} /></div>
+                <div>
+                  <h2 className="font-bold text-base text-text-primary">Card Payment</h2>
+                  <p className="text-xs text-text-muted">{connectedReaderLabel ? `Reader: ${connectedReaderLabel}` : 'Stripe Terminal'}</p>
+                </div>
+              </div>
+              {!['waiting_for_card', 'processing'].includes(cardStatus) && (
+                <button onClick={cancelCardPayment} className="btn-ghost p-1.5"><X size={17} /></button>
+              )}
+            </div>
+
+            <div className="p-5 space-y-5">
+              <div className="bg-brand/10 border border-brand/20 rounded-xl p-4 text-center">
+                <p className="text-sm text-text-muted mb-1">Amount to Charge</p>
+                <p className="text-4xl font-black text-brand">{formatCurrency(chargeAmountDisplay)}</p>
+              </div>
+
+              {(cardStatus === 'idle' || cardStatus === 'initializing' || cardStatus === 'discovering' || cardStatus === 'connecting' || cardStatus === 'creating_intent') && (
+                <div className="text-center py-5 space-y-3">
+                  <Loader size={40} className="text-brand animate-spin mx-auto" />
+                  <p className="font-bold text-base text-text-primary">
+                    {cardStatus === 'discovering' ? 'Looking for a card reader…'
+                      : cardStatus === 'connecting' ? 'Connecting to reader…'
+                      : cardStatus === 'creating_intent' ? 'Preparing payment…'
+                      : 'Starting up…'}
+                  </p>
+                </div>
+              )}
+
+              {cardStatus === 'waiting_for_card' && (
+                <div className="text-center space-y-4">
+                  <div className="w-20 h-20 bg-brand/10 border-2 border-brand/20 rounded-full flex items-center justify-center mx-auto">
+                    <CreditCard size={36} className="text-brand animate-bounce" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-lg text-text-primary">Tap, insert, or swipe card</p>
+                    <p className="text-sm text-text-muted mt-1">Ask the customer to present their card to the reader now</p>
+                  </div>
+                  <div className="flex items-center justify-center gap-2 text-sm text-text-muted">
+                    <div className="w-4 h-4 border-2 border-border border-t-brand rounded-full animate-spin" />
+                    Waiting for the reader…
+                  </div>
+                </div>
+              )}
+
+              {cardStatus === 'processing' && (
+                <div className="text-center py-5 space-y-3">
+                  <Loader size={40} className="text-brand animate-spin mx-auto" />
+                  <p className="font-bold text-base text-text-primary">Processing payment…</p>
+                  <p className="text-sm text-text-muted">Do not remove the card yet</p>
+                </div>
+              )}
+
+              {cardStatus === 'completed' && (
+                <div className="text-center py-5 space-y-3">
+                  <CheckCircle size={56} className="text-status-success mx-auto" />
+                  <p className="font-bold text-status-success text-xl">Payment Approved!</p>
+                </div>
+              )}
+
+              {cardStatus === 'not_configured' && (
+                <div className="text-center space-y-4">
+                  <AlertCircle size={48} className="text-status-warning mx-auto" />
+                  <p className="font-bold text-status-warning text-lg">Card Reader Not Set Up</p>
+                  <p className="text-sm text-text-muted">{cardError}</p>
+                  <p className="text-xs text-text-muted">Ask an administrator to configure Stripe in Settings before using card payments.</p>
+                  <button onClick={cancelCardPayment} className="btn-secondary w-full py-3">Close</button>
+                </div>
+              )}
+
+              {cardStatus === 'failed' && (
+                <div className="text-center space-y-4">
+                  <AlertCircle size={48} className="text-status-error mx-auto" />
+                  <p className="font-bold text-status-error text-lg">Payment Failed</p>
+                  <p className="text-sm text-text-muted">{cardError}</p>
+                  <div className="flex gap-3">
+                    <button onClick={cancelCardPayment} className="btn-secondary flex-1 py-3">Close</button>
+                    <button onClick={runCardPayment} className="btn-primary flex-1 py-3">Try Again</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {/* ══════════════ Split Bill Modal ══════════════ */}
       {showSplitModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
