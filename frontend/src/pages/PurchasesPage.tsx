@@ -4,6 +4,7 @@ import api from '@/lib/api';
 import { formatCurrency, formatDate, toLocalDateString } from '@/lib/utils';
 import { PageHeader, StatusBadge, Pagination, Modal, LoadingPage, FinancialSummaryExportButton } from '@/components/ui';
 import PurchaseOrderPrint, { PurchaseOrderContent } from '@/components/PurchaseOrderDocument';
+import { useAuthStore } from '@/store/authStore';
 import toast from 'react-hot-toast';
 
 interface PurchaseOrder {
@@ -35,6 +36,9 @@ const tabStatus: Record<string, string> = {
 };
 
 export default function PurchasesPage() {
+  const { user } = useAuthStore();
+  const canManage = user?.role === 'administrator' || user?.role === 'manager';
+  const [updatingPaymentStatus, setUpdatingPaymentStatus] = useState(false);
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [inventoryOptions, setInventoryOptions] = useState<InventoryItemOption[]>([]);
@@ -126,6 +130,22 @@ export default function PurchasesPage() {
 
   // Real CSV export of the currently loaded purchase orders list — was a
   // dead button before, no onClick at all.
+  const updatePaymentStatus = async (status: 'unpaid' | 'partial' | 'paid') => {
+    if (!selected) return;
+    setUpdatingPaymentStatus(true);
+    try {
+      const { data } = await api.put(`/purchases/${selected.id}/payment-status`, { payment_status: status });
+      setSelected(prev => prev ? { ...prev, payment_status: status } : prev);
+      setOrders(prev => prev.map(o => o.id === selected.id ? { ...o, payment_status: status } : o));
+      toast.success(data.message || 'Payment status updated');
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not update payment status';
+      toast.error(msg);
+    } finally {
+      setUpdatingPaymentStatus(false);
+    }
+  };
+
   const exportPurchasesCsv = () => {
     const rows: string[][] = [['PO Number', 'Supplier', 'Status', 'Order Date', 'Expected Date', 'Payment Status', 'Total Amount']];
     orders.forEach(o => rows.push([
@@ -443,7 +463,6 @@ export default function PurchasesPage() {
                 ['Order Date', selected.order_date ? formatDate(selected.order_date) : '—'],
                 ['Expected Date', selected.expected_date ? formatDate(selected.expected_date) : '—'],
                 ['Received Date', selected.received_date ? formatDate(selected.received_date) : '—'],
-                ['Payment Status', selected.payment_status?.replace(/\b\w/g, l => l.toUpperCase()) || '—'],
                 ['Total Amount', formatCurrency(selected.total_amount)],
               ].map(([label, value]) => (
                 <div key={label} className="flex justify-between">
@@ -451,6 +470,23 @@ export default function PurchasesPage() {
                   <span className="font-medium">{value}</span>
                 </div>
               ))}
+              <div className="flex justify-between items-center">
+                <span className="text-text-muted">Payment Status</span>
+                {canManage ? (
+                  <select
+                    value={selected.payment_status}
+                    disabled={updatingPaymentStatus}
+                    onChange={e => updatePaymentStatus(e.target.value as 'unpaid' | 'partial' | 'paid')}
+                    className="select text-xs py-1 disabled:opacity-50"
+                  >
+                    <option value="unpaid">Unpaid</option>
+                    <option value="partial">Partial</option>
+                    <option value="paid">Paid</option>
+                  </select>
+                ) : (
+                  <span className="font-medium">{selected.payment_status?.replace(/\b\w/g, l => l.toUpperCase()) || '—'}</span>
+                )}
+              </div>
             </div>
 
             {selected.items && selected.items.length > 0 && (

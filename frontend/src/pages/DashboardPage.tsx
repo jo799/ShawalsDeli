@@ -44,6 +44,19 @@ interface DashStats {
   total_orders_change_pct: number | null;
   avg_order_value_change_pct: number | null;
   new_customers_change_pct: number | null;
+  // The 10 owner KPIs — what the health of the whole business looks like
+  // at a glance. cash_position/inventory_value/purchases_this_month/
+  // expenses_this_month/food_cost_pct/waste_cost_this_month/
+  // top_profitable_item all come from the dedicated /reports/owner-dashboard
+  // endpoint; the rest above are already computed for other parts of this
+  // page and simply reused here rather than fetched twice.
+  cash_position: number;
+  inventory_value: number;
+  purchases_this_month: number;
+  expenses_this_month: number;
+  food_cost_pct: number;
+  waste_cost_this_month: number;
+  top_profitable_item: { name: string; profit: number; sales: number } | null;
 }
 
 interface RecentOrder {
@@ -54,7 +67,7 @@ interface RecentOrder {
 
 export default function DashboardPage() {
   const isOnline = useOnlineStatus();
-  const [stats, setStats] = useState<DashStats>({ today_sales: 0, today_orders: 0, active_customers: 0, low_stock_items: 0, unavailable_menu_items: 0, pending_orders: 0, avg_order_value: 0, gross_profit: 0, total_expenses: 0, net_profit: 0, total_sales_change_pct: null, total_orders_change_pct: null, avg_order_value_change_pct: null, new_customers_change_pct: null });
+  const [stats, setStats] = useState<DashStats>({ today_sales: 0, today_orders: 0, active_customers: 0, low_stock_items: 0, unavailable_menu_items: 0, pending_orders: 0, avg_order_value: 0, gross_profit: 0, total_expenses: 0, net_profit: 0, total_sales_change_pct: null, total_orders_change_pct: null, avg_order_value_change_pct: null, new_customers_change_pct: null, cash_position: 0, inventory_value: 0, purchases_this_month: 0, expenses_this_month: 0, food_cost_pct: 0, waste_cost_this_month: 0, top_profitable_item: null });
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [salesData, setSalesData] = useState<Array<{hour: string; Sales: number; Orders: number}>>([]);
   const [categoryData, setCategoryData] = useState<Array<{name: string; value: number}>>([]);
@@ -64,15 +77,17 @@ export default function DashboardPage() {
     const load = async () => {
       try {
         const today = toLocalDateString();
-        const [reportRes, ordersRes, inventoryRes, customersRes, unavailableRes] = await Promise.all([
+        const [reportRes, ordersRes, inventoryRes, customersRes, unavailableRes, ownerRes] = await Promise.all([
           api.get('/reports/daily', { params: { date: today } }).catch(() => ({ data: { data: null } })),
           api.get('/orders', { params: { limit: 6 } }).catch(() => ({ data: { data: [] } })),
           api.get('/inventory').catch(() => ({ data: { stats: { low_stock: 0 } } })),
           api.get('/customers', { params: { limit: 1, status: 'active', include_growth: true } }).catch(() => ({ data: { pagination: { total: 0 } } })),
           api.get('/menu/items', { params: { limit: 1, status: 'unavailable,out_of_stock' } }).catch(() => ({ data: { pagination: { total: 0 } } })),
+          api.get('/reports/owner-dashboard').catch(() => ({ data: { data: null } })),
         ]);
 
         const rep = reportRes.data.data;
+        const owner = ownerRes.data.data;
         if (rep) {
           setStats({
             today_sales: rep.summary?.total_sales || 0,
@@ -89,6 +104,13 @@ export default function DashboardPage() {
             total_orders_change_pct: rep.comparison?.total_orders_change_pct ?? null,
             avg_order_value_change_pct: rep.comparison?.avg_order_value_change_pct ?? null,
             new_customers_change_pct: customersRes.data.growth?.change_pct ?? null,
+            cash_position: owner?.cash_position_today ?? 0,
+            inventory_value: owner?.inventory_value ?? 0,
+            purchases_this_month: owner?.purchases_this_month ?? 0,
+            expenses_this_month: owner?.expenses_this_month ?? 0,
+            food_cost_pct: owner?.food_cost_pct ?? 0,
+            waste_cost_this_month: owner?.waste_cost_this_month ?? 0,
+            top_profitable_item: owner?.top_profitable_item ?? null,
           });
           const hourly = rep.hourly?.map((h: {hour:number;sales:number;orders:number}) => ({
             hour: `${String(h.hour).padStart(2,'0')}:00`,
@@ -144,6 +166,44 @@ export default function DashboardPage() {
             <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-status-success animate-pulse' : 'bg-status-error'}`} />
             {isOnline ? 'System Online' : 'Offline'}
           </div>
+        </div>
+      </div>
+
+      {/* Business Health — the 10 numbers an owner needs to read the whole
+          business in about 30 seconds. Deliberately placed first and most
+          prominent, above the day-to-day operational KPIs below — this
+          answers "is the business healthy" before "what's happening right
+          now". Revenue/profit/food-cost figures are today; purchases,
+          expenses, waste, and top item are this month (see
+          getOwnerDashboard for why); inventory value is a live snapshot. */}
+      <div className="card p-4 md:p-5 mb-6 border-brand/20">
+        <h2 className="font-semibold text-text-primary mb-4 flex items-center gap-2">
+          <TrendingUp size={16} className="text-brand" /> Business Health
+        </h2>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          {[
+            { label: 'Revenue Today', value: formatCurrency(stats.today_sales), color: 'text-text-primary' },
+            { label: 'Gross Profit', value: formatCurrency(stats.gross_profit), color: 'text-status-success' },
+            { label: 'Net Profit', value: formatCurrency(stats.net_profit), color: stats.net_profit >= 0 ? 'text-status-success' : 'text-status-error' },
+            { label: 'Cash Position', value: formatCurrency(stats.cash_position), color: stats.cash_position >= 0 ? 'text-status-success' : 'text-status-error', sub: 'today' },
+            { label: 'Inventory Value', value: formatCurrency(stats.inventory_value), color: 'text-status-purple', sub: 'on hand now' },
+            { label: 'Purchases', value: formatCurrency(stats.purchases_this_month), color: 'text-text-primary', sub: 'this month' },
+            { label: 'Expenses', value: formatCurrency(stats.expenses_this_month), color: 'text-status-error', sub: 'this month' },
+            { label: 'Food Cost %', value: `${stats.food_cost_pct}%`, color: stats.food_cost_pct > 35 ? 'text-status-error' : 'text-status-success', sub: 'of net sales today' },
+            { label: 'Waste Cost', value: formatCurrency(stats.waste_cost_this_month), color: stats.waste_cost_this_month > 0 ? 'text-status-error' : 'text-text-primary', sub: 'this month' },
+            {
+              label: 'Top Profitable Item',
+              value: stats.top_profitable_item ? stats.top_profitable_item.name : '—',
+              color: 'text-status-success',
+              sub: stats.top_profitable_item ? `${formatCurrency(stats.top_profitable_item.profit)} profit this month` : 'No sales yet this month',
+            },
+          ].map(kpi => (
+            <div key={kpi.label} className="min-w-0">
+              <p className="text-xs text-text-muted">{kpi.label}</p>
+              <p className={`text-lg font-bold truncate ${kpi.color}`}>{loading ? '—' : kpi.value}</p>
+              {kpi.sub && <p className="text-[10px] text-text-muted mt-0.5">{kpi.sub}</p>}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -283,7 +343,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Quick Actions + Stats */}
+        {/* Quick Actions */}
         <div className="space-y-4">
           <div className="card p-4">
             <h2 className="font-semibold text-text-primary mb-3">Quick Actions</h2>
@@ -294,23 +354,6 @@ export default function DashboardPage() {
                   <action.icon size={18} />
                   {action.label}
                 </a>
-              ))}
-            </div>
-          </div>
-
-          <div className="card p-4">
-            <h2 className="font-semibold text-text-primary mb-3">Business Summary</h2>
-            <div className="space-y-2.5">
-              {[
-                { label: 'Total Sales', value: formatCurrency(stats.today_sales), color: 'text-brand' },
-                { label: 'Gross Profit', value: formatCurrency(stats.gross_profit), color: 'text-status-success' },
-                { label: 'Expenses Today', value: formatCurrency(stats.total_expenses), color: 'text-status-error' },
-                { label: 'Net Profit', value: formatCurrency(stats.net_profit), color: stats.net_profit >= 0 ? 'text-status-success' : 'text-status-error' },
-              ].map(row => (
-                <div key={row.label} className="flex justify-between items-center">
-                  <span className="text-xs text-text-muted">{row.label}</span>
-                  <span className={`text-xs font-bold ${row.color}`}>{loading ? '—' : row.value}</span>
-                </div>
               ))}
             </div>
           </div>
