@@ -219,12 +219,24 @@ const helpSections: HelpSection[] = [
         ],
       },
       {
-        title: 'Issue a refund (Admin / Manager only)',
+        title: 'Issue a refund',
         steps: [
-          'Open a paid order — the Refund button appears only for administrators and managers.',
-          'Enter the refund amount (cannot exceed what was paid).',
-          'Add a reason and tick Restock if ingredients should go back into inventory.',
-          'Submit — the order balance and loyalty points adjust accordingly.',
+          'Open a paid order — the Refund button appears for administrators, managers, and cashiers.',
+          'Enter the refund amount (cannot exceed what was paid) and a reason (required).',
+          'Tick Restock if ingredients should go back into inventory.',
+          'Administrators submit the refund directly — it processes immediately.',
+          'Managers and cashiers instead submit a request; nothing is refunded yet until an administrator approves it.',
+        ],
+      },
+      {
+        title: 'Review refund requests (Administrator)',
+        steps: [
+          'Open Orders → Refund Requests (badge shows how many are waiting).',
+          'Review the amount, reason, and who requested it.',
+          'Approve to actually process the refund, or Decline with an optional reason shown back to the requester.',
+        ],
+        notes: [
+          'Enable phone alerts from the same panel to get a notification the moment a new request comes in.',
         ],
       },
       {
@@ -236,6 +248,7 @@ const helpSections: HelpSection[] = [
           'Ready — food is plated, waiting to be served or collected.',
           'Completed — closed out; dine-in table released if paid.',
           'Cancelled — voided; no further payment expected.',
+          'Refunded — shown instead of Cancelled specifically when money was actually returned, so the two are never confused.',
         ],
       },
     ],
@@ -261,7 +274,20 @@ const helpSections: HelpSection[] = [
         notes: [
           'Table number shows for dine-in; takeaway/delivery show order type instead.',
           'Each line lists item name, quantity, and any special instructions.',
-          'Time badges show how long the order has been waiting.',
+          'Time badges show how long the order has been in its current status (not just since it was placed).',
+          'If a chef has started or been assigned to an order, their name shows on the card.',
+        ],
+      },
+      {
+        title: 'Assign an order to a chef (Administrator)',
+        steps: [
+          'On an unattended order in the New column, tap Assign to chef.',
+          'Pick a chef from the list — they get a phone notification if they have alerts enabled.',
+          'The order stays in New; the chef still needs to tap Start Preparing themselves.',
+          'Already assigned? Tap Reassign to pick someone else instead.',
+        ],
+        notes: [
+          'Once assigned, only that chef (or an administrator/manager) can tap Start Preparing on it — this stops two people from grabbing the same order.',
         ],
       },
       {
@@ -272,6 +298,17 @@ const helpSections: HelpSection[] = [
         ],
         notes: [
           'Orders in Awaiting Payment (unpaid M-Pesa) do not appear here until payment confirms.',
+        ],
+      },
+      {
+        title: 'Phone alerts',
+        steps: [
+          'Tap Enable phone alerts in the kitchen header.',
+          'Allow notifications when your browser/phone prompts you.',
+          'You\'ll now get a real phone notification for new orders even if this tab isn\'t open.',
+        ],
+        notes: [
+          'This is separate from Sound — Sound only plays while this page is open in front of you.',
         ],
       },
     ],
@@ -341,14 +378,25 @@ const helpSections: HelpSection[] = [
     id: 'dashboard',
     title: 'Dashboard',
     icon: LayoutDashboard,
-    summary: 'Today\'s snapshot — sales, orders, and quick links.',
+    summary: 'The 10-number business health check, plus today\'s operational snapshot.',
     topics: [
       {
-        title: 'Use the dashboard',
+        title: 'Business Health — read the whole business in 30 seconds',
+        notes: [
+          'Revenue Today and Gross Profit / Net Profit today — the full chain from sales down to actual bottom line.',
+          'Cash Position today — real money collected today minus today\'s expenses and any purchase paid in full today.',
+          'Inventory Value — what\'s on the shelf right now, valued at current cost.',
+          'Purchases and Expenses — both scoped to this month, not just today.',
+          'Food Cost % — cost of goods sold as a share of net sales; the standard restaurant efficiency number.',
+          'Waste Cost — the cost impact of everything logged as waste/spoilage this month.',
+          'Top Profitable Item — sorted by actual profit contributed this month, not by how much it sold for — a high-margin item that rarely sells can lose to a lower-margin one sold in volume.',
+        ],
+      },
+      {
+        title: 'Use the rest of the dashboard',
         steps: [
-          'Open Dashboard (home icon) after login.',
-          'Review today\'s sales total, order count, and table occupancy cards.',
-          'Scroll for recent orders and the revenue chart.',
+          'Scroll past Business Health for today\'s order count, active customers, and quick-link cards.',
+          'Review recent orders and the sales trend chart further down.',
           'Click a quick-link card to jump to POS, Orders, Kitchen, etc.',
         ],
         notes: [
@@ -436,8 +484,12 @@ const helpSections: HelpSection[] = [
       {
         title: 'Review history',
         steps: [
-          'Open an item\'s transaction history to see every adjustment and sale deduction.',
-          'Each row shows who made the change and when.',
+          'Open an item\'s activity/transaction history to see every adjustment and sale deduction.',
+          'Each row shows who made the change and when, with a clear reason underneath.',
+          'Administrators and managers can click a reason to edit or add one after the fact.',
+        ],
+        notes: [
+          'Entries now show a plain-language reason instead of a generic "Adjustment" — Kitchen Consumption (a sale deducted it), Purchase Received, Stock Count Variance, Waste / Spoilage, Stock Transfer, or Order Cancelled (Restocked).',
         ],
       },
     ],
@@ -462,6 +514,29 @@ const helpSections: HelpSection[] = [
           'Open the PO from the list → Receive Delivery.',
           'Enter the quantity actually received for each line (can be partial).',
           'Confirm — inventory increases automatically and status becomes Partially Received or Received.',
+        ],
+        notes: [
+          'If a line was for something not yet in Inventory, receiving it creates that inventory item automatically rather than losing the stock — later deliveries of the same line credit that same item.',
+        ],
+      },
+      {
+        title: 'Track payment status (Administrator / Manager)',
+        steps: [
+          'Open the PO detail panel.',
+          'Change Payment Status to Unpaid, Partial, or Paid as you actually pay the supplier.',
+        ],
+        notes: [
+          'This matters beyond bookkeeping — Cash Position on the Dashboard only counts a purchase as money out once it\'s marked Paid.',
+        ],
+      },
+      {
+        title: 'Download a financial summary',
+        steps: [
+          'Click Financial Summary in the header and pick Today, This Week, This Month, or This Year.',
+          'Downloads a real Excel file with three sheets: a Sales → Expenses → Net Profit summary, an itemized Expenses list, and an itemized Purchases list for that period.',
+        ],
+        notes: [
+          'The same button and file are available from the Expenses page too — it\'s the same report either way.',
         ],
       },
       {
@@ -515,7 +590,7 @@ const helpSections: HelpSection[] = [
       {
         title: 'How customers earn points',
         notes: [
-          '1 point per KES 10 spent when the order is fully paid and completed.',
+          '1 point per KES 100 spent when the order is fully paid and completed.',
           'Points are not earned on the portion of a bill paid with redeemed points.',
           'Customer must be attached to the order at POS; toggle award points on before checkout.',
         ],
@@ -575,9 +650,16 @@ const helpSections: HelpSection[] = [
       {
         title: 'What the report includes',
         notes: [
-          'Total revenue, order count, average ticket.',
+          'A full breakdown from Total Sales down to Net Profit — Discounts, Net Sales, Cost of Goods Sold, Gross Profit, Operating Expenses, then Net Profit and both margins.',
           'Payment method breakdown (Cash, M-Pesa, Card, etc.).',
           'Top-selling items and categories for the selected period.',
+        ],
+      },
+      {
+        title: 'Export sales items to Excel',
+        steps: [
+          'Click Sales Items in the header and pick Today, This Week, This Month, or This Year.',
+          'Downloads a real Excel file: a line-by-line Sales Detail sheet (item, amount, time, who sold it, payment method) and a Summary by Item sheet showing what actually sold best.',
         ],
       },
     ],
@@ -602,6 +684,13 @@ const helpSections: HelpSection[] = [
           'From the expense list or detail panel, click Upload receipt.',
           'Select an image file — it links to that expense row.',
           'Click the file icon later to view it.',
+        ],
+      },
+      {
+        title: 'Download a financial summary',
+        steps: [
+          'Click Financial Summary in the header and pick Today, This Week, This Month, or This Year.',
+          'Downloads a real Excel file with a Sales → Expenses → Net Profit summary sheet plus itemized Expenses and Purchases sheets for that period.',
         ],
       },
       {
@@ -649,7 +738,7 @@ const helpSections: HelpSection[] = [
           'This mirrors what appears in each person\'s sidebar.',
         ],
         notes: [
-          'This system does not track clock-in/out — use Scheduling for shift planning.',
+          'Clock-in/out, recurring days off, and sick-off requests are all on the Scheduling page, not here.',
         ],
       },
     ],
@@ -658,14 +747,57 @@ const helpSections: HelpSection[] = [
     id: 'scheduling',
     title: 'Staff Scheduling',
     icon: Calendar,
-    summary: 'Weekly shift grid for the team.',
+    summary: 'Weekly shift grid, clock in/out, recurring days off, and sick-off requests.',
     topics: [
+      {
+        title: 'Clock in and out',
+        steps: [
+          'Open Scheduling — every staff member sees a Clock In/Out card at the top, regardless of role.',
+          'Tap Check In when your shift starts, Check Out when it ends.',
+          'Your status for today shows right there — you can\'t check in twice or check out before checking in.',
+        ],
+      },
       {
         title: 'Build the week',
         steps: [
-          'Open Scheduling — the grid shows staff rows and day columns.',
+          'The grid shows staff rows and day columns.',
           'Click a cell → pick morning, day, evening, night, or off.',
           'Use Add Shift for one-off entries with a specific date.',
+        ],
+      },
+      {
+        title: 'Set a recurring day off (Administrator / Manager)',
+        steps: [
+          'Under a staff member\'s name, click the "No recurring day off" (or current setting) line.',
+          'Pick a day of the week — done once, it applies every week from then on.',
+          'Change it any time the same way; pick "No recurring day off" to clear it.',
+        ],
+        notes: [
+          'A specific date already scheduled (someone covering that day, or an approved sick-off day) always overrides the recurring default for that one day.',
+        ],
+      },
+      {
+        title: 'Request a sick-off day',
+        steps: [
+          'Click Request Sick Off in the header.',
+          'Pick the date, write a short message explaining the request, and optionally upload a hospital note/receipt.',
+          'Submit — an administrator is notified and will approve or decline it.',
+          'Check My Requests any time to see the status of everything you\'ve submitted, including any decline reason.',
+        ],
+        notes: [
+          'No receipt yet? Submit without one — you can still track the request in My Requests while you sort it out.',
+        ],
+      },
+      {
+        title: 'Review sick-off requests (Administrator)',
+        steps: [
+          'Click Sick-Off Requests in the header (badge shows how many are pending).',
+          'Read the message and view the uploaded receipt if there is one.',
+          'Approve — this automatically marks that day off in the schedule grid, no extra step needed.',
+          'Or Decline, optionally with a reason shown back to the requester.',
+        ],
+        notes: [
+          'Enable alerts from the same header to get a phone notification the moment a new request comes in.',
         ],
       },
       {
@@ -794,6 +926,13 @@ const troubleshootingEntries: TroubleshootingEntry[] = [
       'The server always uses current menu prices at checkout.',
       'Refresh POS if menu was recently updated.',
       'Remove and re-add items if the cart was built before a price change.',
+    ],
+  },
+  {
+    problem: '"Start Preparing" won\'t work on an order in Kitchen Display',
+    steps: [
+      'Check the card — if it says "Assigned to [name]" or "Only [name] can start this", an administrator assigned it to a specific chef.',
+      'Only that chef (or an administrator/manager) can start it — ask them to tap Start Preparing, or have an admin reassign it to you.',
     ],
   },
 ];
