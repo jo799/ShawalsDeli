@@ -103,7 +103,21 @@ function OrderCard({
               a chef glancing at the board should be able to tell at a
               glance whether this one's already someone else's. Only the
               controls to actually change the assignment are admin-gated. */}
-          {order.prepared_by_name ? (
+          {assigningOrderId === order.id ? (
+            <div className="flex items-center gap-1.5">
+              <select
+                autoFocus
+                disabled={assignBusy}
+                onChange={e => { if (e.target.value) onAssign(order.id, e.target.value); }}
+                defaultValue=""
+                className="select text-[11px] py-1 flex-1 disabled:opacity-50"
+              >
+                <option value="" disabled>Select a chef…</option>
+                {chefs.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
+              </select>
+              <button onClick={onCloseAssign} className="btn-ghost p-1 shrink-0"><X size={12} /></button>
+            </div>
+          ) : order.prepared_by_name ? (
             <div className="flex items-center justify-between gap-1 text-[11px] text-text-muted bg-surface-50 rounded-lg px-2 py-1.5">
               <span className="flex items-center gap-1 min-w-0">
                 <UserCheck size={11} className="shrink-0" /> <span className="truncate">Assigned to {order.prepared_by_name}</span>
@@ -113,28 +127,12 @@ function OrderCard({
               )}
             </div>
           ) : isAdmin ? (
-            assigningOrderId === order.id ? (
-              <div className="flex items-center gap-1.5">
-                <select
-                  autoFocus
-                  disabled={assignBusy}
-                  onChange={e => { if (e.target.value) onAssign(order.id, e.target.value); }}
-                  defaultValue=""
-                  className="select text-[11px] py-1 flex-1 disabled:opacity-50"
-                >
-                  <option value="" disabled>Select a chef…</option>
-                  {chefs.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
-                </select>
-                <button onClick={onCloseAssign} className="btn-ghost p-1 shrink-0"><X size={12} /></button>
-              </div>
-            ) : (
-              <button
-                onClick={() => onOpenAssign(order.id)}
-                className="w-full flex items-center justify-center gap-1.5 text-[11px] text-brand hover:text-brand-400 border border-dashed border-border rounded-lg py-1.5 transition-colors"
-              >
-                <UserPlus size={12} /> Assign to chef
-              </button>
-            )
+            <button
+              onClick={() => onOpenAssign(order.id)}
+              className="w-full flex items-center justify-center gap-1.5 text-[11px] text-brand hover:text-brand-400 border border-dashed border-border rounded-lg py-1.5 transition-colors"
+            >
+              <UserPlus size={12} /> Assign to chef
+            </button>
           ) : null}
           {(() => {
             const lockedToSomeoneElse = !!order.prepared_by && order.prepared_by !== currentUserId && !canOverrideAssignment;
