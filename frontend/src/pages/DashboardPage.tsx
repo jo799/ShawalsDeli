@@ -40,6 +40,10 @@ interface DashStats {
   gross_profit: number;
   total_expenses: number;
   net_profit: number;
+  total_sales_change_pct: number | null;
+  total_orders_change_pct: number | null;
+  avg_order_value_change_pct: number | null;
+  new_customers_change_pct: number | null;
 }
 
 interface RecentOrder {
@@ -50,7 +54,7 @@ interface RecentOrder {
 
 export default function DashboardPage() {
   const isOnline = useOnlineStatus();
-  const [stats, setStats] = useState<DashStats>({ today_sales: 0, today_orders: 0, active_customers: 0, low_stock_items: 0, unavailable_menu_items: 0, pending_orders: 0, avg_order_value: 0, gross_profit: 0, total_expenses: 0, net_profit: 0 });
+  const [stats, setStats] = useState<DashStats>({ today_sales: 0, today_orders: 0, active_customers: 0, low_stock_items: 0, unavailable_menu_items: 0, pending_orders: 0, avg_order_value: 0, gross_profit: 0, total_expenses: 0, net_profit: 0, total_sales_change_pct: null, total_orders_change_pct: null, avg_order_value_change_pct: null, new_customers_change_pct: null });
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [salesData, setSalesData] = useState<Array<{hour: string; Sales: number; Orders: number}>>([]);
   const [categoryData, setCategoryData] = useState<Array<{name: string; value: number}>>([]);
@@ -64,7 +68,7 @@ export default function DashboardPage() {
           api.get('/reports/daily', { params: { date: today } }).catch(() => ({ data: { data: null } })),
           api.get('/orders', { params: { limit: 6 } }).catch(() => ({ data: { data: [] } })),
           api.get('/inventory').catch(() => ({ data: { stats: { low_stock: 0 } } })),
-          api.get('/customers', { params: { limit: 1, status: 'active' } }).catch(() => ({ data: { pagination: { total: 0 } } })),
+          api.get('/customers', { params: { limit: 1, status: 'active', include_growth: true } }).catch(() => ({ data: { pagination: { total: 0 } } })),
           api.get('/menu/items', { params: { limit: 1, status: 'unavailable,out_of_stock' } }).catch(() => ({ data: { pagination: { total: 0 } } })),
         ]);
 
@@ -81,6 +85,10 @@ export default function DashboardPage() {
             gross_profit: rep.summary?.gross_profit || 0,
             total_expenses: rep.summary?.total_expenses || 0,
             net_profit: rep.summary?.net_profit || 0,
+            total_sales_change_pct: rep.comparison?.total_sales_change_pct ?? null,
+            total_orders_change_pct: rep.comparison?.total_orders_change_pct ?? null,
+            avg_order_value_change_pct: rep.comparison?.avg_order_value_change_pct ?? null,
+            new_customers_change_pct: customersRes.data.growth?.change_pct ?? null,
           });
           const hourly = rep.hourly?.map((h: {hour:number;sales:number;orders:number}) => ({
             hour: `${String(h.hour).padStart(2,'0')}:00`,
@@ -99,14 +107,17 @@ export default function DashboardPage() {
     load();
   }, []);
 
-  const kpis = [
-    { label: "Today's Sales", value: formatCurrency(stats.today_sales), icon: DollarSign, iconBg: 'bg-brand/10', iconColor: 'text-brand', trend: +18, trendLabel: 'vs yesterday', positive: true },
-    { label: "Today's Orders", value: stats.today_orders, icon: ClipboardList, iconBg: 'bg-status-info/10', iconColor: 'text-status-info', trend: +12, trendLabel: 'vs yesterday', positive: true },
-    { label: 'Active Customers', value: stats.active_customers, icon: Users, iconBg: 'bg-status-success/10', iconColor: 'text-status-success', trend: +5, trendLabel: 'this month', positive: true },
-    { label: 'Avg Order Value', value: formatCurrency(stats.avg_order_value), icon: TrendingUp, iconBg: 'bg-status-purple/10', iconColor: 'text-status-purple', trend: +8, trendLabel: 'vs yesterday', positive: true },
-    { label: 'Pending Orders', value: stats.pending_orders, icon: ChefHat, iconBg: 'bg-status-warning/10', iconColor: 'text-status-warning', trend: 0, trendLabel: 'right now', positive: true },
-    { label: 'Low Stock Items', value: stats.low_stock_items, icon: AlertTriangle, iconBg: 'bg-status-error/10', iconColor: 'text-status-error', trend: stats.low_stock_items, trendLabel: 'need restocking', positive: false },
-    { label: 'Unavailable Items', value: stats.unavailable_menu_items, icon: Ban, iconBg: 'bg-status-error/10', iconColor: 'text-status-error', trend: stats.unavailable_menu_items, trendLabel: 'marked off menu', positive: false },
+  const kpis: Array<{
+    label: string; value: string | number; icon: typeof DollarSign; iconBg: string; iconColor: string;
+    pct?: number | null; pctLabel?: string; note?: string; notePositive?: boolean;
+  }> = [
+    { label: "Today's Sales", value: formatCurrency(stats.today_sales), icon: DollarSign, iconBg: 'bg-brand/10', iconColor: 'text-brand', pct: stats.total_sales_change_pct, pctLabel: 'vs yesterday' },
+    { label: "Today's Orders", value: stats.today_orders, icon: ClipboardList, iconBg: 'bg-status-info/10', iconColor: 'text-status-info', pct: stats.total_orders_change_pct, pctLabel: 'vs yesterday' },
+    { label: 'Active Customers', value: stats.active_customers, icon: Users, iconBg: 'bg-status-success/10', iconColor: 'text-status-success', pct: stats.new_customers_change_pct, pctLabel: 'new customers vs last month' },
+    { label: 'Avg Order Value', value: formatCurrency(stats.avg_order_value), icon: TrendingUp, iconBg: 'bg-status-purple/10', iconColor: 'text-status-purple', pct: stats.avg_order_value_change_pct, pctLabel: 'vs yesterday' },
+    { label: 'Pending Orders', value: stats.pending_orders, icon: ChefHat, iconBg: 'bg-status-warning/10', iconColor: 'text-status-warning' },
+    { label: 'Low Stock Items', value: stats.low_stock_items, icon: AlertTriangle, iconBg: 'bg-status-error/10', iconColor: 'text-status-error', note: stats.low_stock_items > 0 ? `${stats.low_stock_items} need restocking` : undefined, notePositive: false },
+    { label: 'Unavailable Items', value: stats.unavailable_menu_items, icon: Ban, iconBg: 'bg-status-error/10', iconColor: 'text-status-error', note: stats.unavailable_menu_items > 0 ? `${stats.unavailable_menu_items} marked off menu` : undefined, notePositive: false },
   ];
 
   const quickActions = [
@@ -145,10 +156,20 @@ export default function DashboardPage() {
             </div>
             <p className="text-2xl font-bold text-text-primary">{loading ? '—' : kpi.value}</p>
             <p className="text-xs text-text-muted mt-0.5">{kpi.label}</p>
-            {kpi.trend !== 0 && (
-              <p className={`text-xs mt-1 flex items-center gap-0.5 ${kpi.positive ? 'text-status-success' : 'text-status-error'}`}>
-                {kpi.positive ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
-                {kpi.trend > 0 ? `+${kpi.trend}%` : kpi.trend} {kpi.trendLabel}
+            {!loading && kpi.pct !== undefined && (
+              kpi.pct === null ? (
+                <p className="text-xs mt-1 text-text-muted">— {kpi.pctLabel}</p>
+              ) : (
+                <p className={`text-xs mt-1 flex items-center gap-0.5 ${kpi.pct >= 0 ? 'text-status-success' : 'text-status-error'}`}>
+                  {kpi.pct >= 0 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
+                  {kpi.pct > 0 ? `+${kpi.pct}%` : `${kpi.pct}%`} {kpi.pctLabel}
+                </p>
+              )
+            )}
+            {!loading && kpi.note && (
+              <p className={`text-xs mt-1 flex items-center gap-0.5 ${kpi.notePositive === false ? 'text-status-error' : 'text-status-success'}`}>
+                {kpi.notePositive === false ? <ArrowDownRight size={10} /> : <ArrowUpRight size={10} />}
+                {kpi.note}
               </p>
             )}
           </div>
