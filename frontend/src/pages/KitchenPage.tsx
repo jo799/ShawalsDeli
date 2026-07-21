@@ -12,7 +12,7 @@ interface Order {
   created_at: string; updated_at?: string; completed_at?: string;
   total?: number; amount_paid?: number;
   special_instructions?: string;
-  prepared_by_name?: string;
+  prepared_by?: string; prepared_by_name?: string;
   items?: Array<{ item_name: string; quantity: number }>;
 }
 
@@ -34,12 +34,13 @@ const formatMinutesToServe = (mins: number): string => {
 };
 
 function OrderCard({
-  order, onAction, compact, isAdmin, chefs, assigningOrderId, onOpenAssign, onCloseAssign, onAssign, assignBusy,
+  order, onAction, compact, isAdmin, chefs, assigningOrderId, onOpenAssign, onCloseAssign, onAssign, assignBusy, currentUserId, canOverrideAssignment,
 }: {
   order: Order; onAction: (id: string, status: string) => void; compact?: boolean;
   isAdmin: boolean; chefs: Chef[]; assigningOrderId: string | null;
   onOpenAssign: (orderId: string) => void; onCloseAssign: () => void;
   onAssign: (orderId: string, chefId: string) => void; assignBusy: boolean;
+  currentUserId?: string; canOverrideAssignment: boolean;
 }) {
   const mins = minutesSince(order.created_at);
   const isUrgent = mins > 20 && order.status === 'preparing';
@@ -135,12 +136,19 @@ function OrderCard({
               </button>
             )
           ) : null}
-          <button
-            onClick={() => onAction(order.id, 'preparing')}
-            className="w-full btn-primary py-1.5 text-xs"
-          >
-            Start Preparing
-          </button>
+          {(() => {
+            const lockedToSomeoneElse = !!order.prepared_by && order.prepared_by !== currentUserId && !canOverrideAssignment;
+            return (
+              <button
+                onClick={() => !lockedToSomeoneElse && onAction(order.id, 'preparing')}
+                disabled={lockedToSomeoneElse}
+                title={lockedToSomeoneElse ? `Assigned to ${order.prepared_by_name || 'another chef'} — only they or an admin can start it` : undefined}
+                className="w-full btn-primary py-1.5 text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {lockedToSomeoneElse ? `Only ${order.prepared_by_name || 'the assigned chef'} can start this` : 'Start Preparing'}
+              </button>
+            );
+          })()}
         </div>
       )}
       {order.status === 'preparing' && (
@@ -206,6 +214,7 @@ export default function KitchenPage() {
   const [pushStatus, setPushStatus] = useState<'subscribed' | 'unsubscribed' | 'unsupported' | 'denied' | 'loading'>('loading');
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'administrator';
+  const canOverrideAssignment = user?.role === 'administrator' || user?.role === 'manager';
   const [chefs, setChefs] = useState<Chef[]>([]);
   const [assigningOrderId, setAssigningOrderId] = useState<string | null>(null);
   const [assignBusy, setAssignBusy] = useState(false);
@@ -532,7 +541,7 @@ export default function KitchenPage() {
             ) : newOrders.length === 0 ? (
               <div className="text-center py-8 text-text-muted text-sm">No new orders</div>
             ) : newOrders.map(order => (
-              <OrderCard key={order.id} order={order} onAction={handleAction} isAdmin={isAdmin} chefs={chefs} assigningOrderId={assigningOrderId} onOpenAssign={setAssigningOrderId} onCloseAssign={() => setAssigningOrderId(null)} onAssign={handleAssign} assignBusy={assignBusy} />
+              <OrderCard key={order.id} order={order} onAction={handleAction} isAdmin={isAdmin} chefs={chefs} assigningOrderId={assigningOrderId} onOpenAssign={setAssigningOrderId} onCloseAssign={() => setAssigningOrderId(null)} onAssign={handleAssign} assignBusy={assignBusy} currentUserId={user?.id} canOverrideAssignment={canOverrideAssignment} />
             ))}
           </div>
         </div>
@@ -551,7 +560,7 @@ export default function KitchenPage() {
             {preparingOrders.length === 0 ? (
               <div className="text-center py-8 text-text-muted text-sm">No orders preparing</div>
             ) : preparingOrders.map(order => (
-              <OrderCard key={order.id} order={order} onAction={handleAction} isAdmin={isAdmin} chefs={chefs} assigningOrderId={assigningOrderId} onOpenAssign={setAssigningOrderId} onCloseAssign={() => setAssigningOrderId(null)} onAssign={handleAssign} assignBusy={assignBusy} />
+              <OrderCard key={order.id} order={order} onAction={handleAction} isAdmin={isAdmin} chefs={chefs} assigningOrderId={assigningOrderId} onOpenAssign={setAssigningOrderId} onCloseAssign={() => setAssigningOrderId(null)} onAssign={handleAssign} assignBusy={assignBusy} currentUserId={user?.id} canOverrideAssignment={canOverrideAssignment} />
             ))}
           </div>
         </div>
@@ -570,7 +579,7 @@ export default function KitchenPage() {
             {readyOrders.length === 0 ? (
               <div className="text-center py-8 text-text-muted text-sm">No orders ready</div>
             ) : readyOrders.map(order => (
-              <OrderCard key={order.id} order={order} onAction={handleAction} isAdmin={isAdmin} chefs={chefs} assigningOrderId={assigningOrderId} onOpenAssign={setAssigningOrderId} onCloseAssign={() => setAssigningOrderId(null)} onAssign={handleAssign} assignBusy={assignBusy} />
+              <OrderCard key={order.id} order={order} onAction={handleAction} isAdmin={isAdmin} chefs={chefs} assigningOrderId={assigningOrderId} onOpenAssign={setAssigningOrderId} onCloseAssign={() => setAssigningOrderId(null)} onAssign={handleAssign} assignBusy={assignBusy} currentUserId={user?.id} canOverrideAssignment={canOverrideAssignment} />
             ))}
           </div>
         </div>

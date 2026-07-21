@@ -1,5 +1,8 @@
-import { cn, getStatusColor } from '@/lib/utils';
-import { LucideIcon } from 'lucide-react';
+import { useState } from 'react';
+import { cn, getStatusColor, toLocalDateString } from '@/lib/utils';
+import { LucideIcon, FileSpreadsheet, ChevronDown } from 'lucide-react';
+import api from '@/lib/api';
+import toast from 'react-hot-toast';
 
 // ─── Badge ───────────────────────────────────────────────────────
 interface BadgeProps { status: string; label?: string; className?: string; }
@@ -165,6 +168,67 @@ export function Pagination({ page, pages, total, limit, onChange }: PaginationPr
         )}
         <button disabled={page === pages} onClick={() => onChange(page + 1)} className="btn-ghost text-xs px-2 py-1 disabled:opacity-30">›</button>
       </div>
+    </div>
+  );
+}
+
+// ─── Financial Summary Export ───────────────────────────────────────
+// Shared by the Purchases and Expenses pages — a real .xlsx covering how
+// expenses and purchases actually connect to profitability for a chosen
+// period (Today/Week/Month/Year), rather than each page only ever
+// exporting its own itemized list with no view of the bigger financial
+// picture. One component so both pages can never drift apart on what this
+// button actually does.
+export function FinancialSummaryExportButton() {
+  const [showMenu, setShowMenu] = useState(false);
+  const [exportingPeriod, setExportingPeriod] = useState<string | null>(null);
+
+  const download = async (period: 'today' | 'week' | 'month' | 'year') => {
+    setExportingPeriod(period);
+    setShowMenu(false);
+    try {
+      const periodParam = period === 'today' ? 'day' : period;
+      const res = await api.get('/reports/financial-summary-export', { params: { period: periodParam }, responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `financial-summary-${period}-${toLocalDateString()}.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Financial summary downloaded');
+    } catch {
+      toast.error('Could not generate the financial summary');
+    } finally {
+      setExportingPeriod(null);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setShowMenu(v => !v)}
+        disabled={exportingPeriod !== null}
+        className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50"
+      >
+        <FileSpreadsheet size={13} /> {exportingPeriod ? 'Generating…' : 'Financial Summary'} <ChevronDown size={13} />
+      </button>
+      {showMenu && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+          <div className="absolute right-0 top-full mt-1 w-44 bg-surface-card border border-border rounded-lg shadow-lg z-20 py-1">
+            {([['today', 'Today'], ['week', 'This Week'], ['month', 'This Month'], ['year', 'This Year']] as const).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => download(value)}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-surface-50 text-text-secondary hover:text-text-primary transition-colors"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { Plus, Download, X, Edit2, Trash2, Upload, FileText, CreditCard, Trendin
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, formatDate, toLocalDateString } from '@/lib/utils';
-import { PageHeader, Pagination, SearchInput, LoadingPage, Modal } from '@/components/ui';
+import { PageHeader, Pagination, SearchInput, LoadingPage, Modal, FinancialSummaryExportButton } from '@/components/ui';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAuthStore } from '@/store/authStore';
 import toast from 'react-hot-toast';
@@ -170,6 +170,7 @@ export function ExpensesPage() {
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
       <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Expenses" subtitle="Track and manage business expenses">
+          <FinancialSummaryExportButton />
           <button onClick={exportCsv} disabled={expenses.length === 0} className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50"><Download size={13} /> Export</button>
           {canManage && <button onClick={openAdd} className="btn-primary flex items-center gap-2 text-sm"><Plus size={14} /> Add Expense</button>}
         </PageHeader>

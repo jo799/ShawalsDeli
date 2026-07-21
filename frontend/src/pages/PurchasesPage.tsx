@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Plus, Download, Eye, Search, X, Printer, Phone, PackageCheck, ShoppingCart, Wallet, Truck, AlertTriangle, Calendar } from 'lucide-react';
 import api from '@/lib/api';
 import { formatCurrency, formatDate, toLocalDateString } from '@/lib/utils';
-import { PageHeader, StatusBadge, Pagination, Modal, LoadingPage } from '@/components/ui';
+import { PageHeader, StatusBadge, Pagination, Modal, LoadingPage, FinancialSummaryExportButton } from '@/components/ui';
 import PurchaseOrderPrint, { PurchaseOrderContent } from '@/components/PurchaseOrderDocument';
 import toast from 'react-hot-toast';
 
@@ -286,6 +286,7 @@ export default function PurchasesPage() {
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
       <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Purchases" subtitle="Manage purchase orders and supplier deliveries">
+          <FinancialSummaryExportButton />
           <label className="btn-secondary flex items-center gap-1.5 text-sm cursor-pointer">
             <Download size={13} /> Import
             <input type="file" accept=".csv,text/csv" className="hidden"

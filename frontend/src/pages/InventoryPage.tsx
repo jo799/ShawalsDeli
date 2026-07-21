@@ -20,6 +20,32 @@ interface Activity {
   notes?: string; performed_by_name?: string; created_at: string; item_name: string;
 }
 
+// Maps the underlying transaction type to something immediately
+// understandable at a glance, rather than the raw enum value. 'sale' in
+// particular used to just read "Sale" — but this is never a sale
+// transaction in the storefront sense, it's ingredients automatically
+// deducted from stock when an order consumes them (see
+// inventoryService.deductInventoryForOrder), so "Kitchen Consumption" is
+// what it actually means to whoever's reading this list.
+const ACTIVITY_TYPE_LABEL: Record<string, string> = {
+  sale: 'Kitchen Consumption',
+  purchase: 'Purchase Received',
+  adjustment: 'Stock Count Variance',
+  waste: 'Waste / Spoilage',
+  transfer: 'Stock Transfer',
+};
+
+// type='adjustment' is used for two genuinely different things: a manual
+// "count fix" entered through the Adjust Stock modal, and the automatic
+// restock that happens when a cancelled order's ingredients are returned
+// (see inventoryService.restockInventoryForOrder) — a real, traceable
+// reversal, not a count variance. The automatic path always writes the
+// same notes text, which is what distinguishes the two here.
+const activityLabel = (act: Activity): string => {
+  if (act.type === 'adjustment' && act.notes?.startsWith('Stock restored')) return 'Order Cancelled (Restocked)';
+  return ACTIVITY_TYPE_LABEL[act.type] || act.type.replace('_', ' ');
+};
+
 const STOCK_STATUS_BADGE: Record<string, string> = {
   in_stock: 'bg-status-success/10 text-status-success border border-status-success/20',
   low_stock: 'bg-status-warning/10 text-status-warning border border-status-warning/20',
@@ -48,6 +74,9 @@ export default function InventoryPage() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [selected, setSelected] = useState<InventoryItem | null>(null);
   const [activity, setActivity] = useState<Activity[]>([]);
+  const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
+  const [editingNotesValue, setEditingNotesValue] = useState('');
+  const [savingNotes, setSavingNotes] = useState(false);
   const [activityLimit, setActivityLimit] = useState(5);
   const [stats, setStats] = useState({ total_items: 0, total_value: 0, low_stock: 0, out_of_stock: 0 });
   const [search, setSearch] = useState('');
@@ -92,6 +121,27 @@ export default function InventoryPage() {
       setActivity(data.data);
     } catch { /* silent */ }
   }, []);
+
+  const saveActivityNotes = async (activityId: string) => {
+    setSavingNotes(true);
+    try {
+      await api.put(`/inventory/activity/${activityId}`, { notes: editingNotesValue.trim() || null });
+      toast.success('Reason updated');
+      setEditingActivityId(null);
+      if (selected) fetchActivity(selected.id, activityLimit);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not update the reason';
+      toast.error(msg);
+    } finally {
+      setSavingNotes(false);
+    }
+  };
+
+  const startEditingActivityNotes = (act: Activity) => {
+    if (!canManage) return;
+    setEditingActivityId(act.id);
+    setEditingNotesValue(act.notes || '');
+  };
 
   useEffect(() => { fetchItems(); }, [fetchItems]);
   useEffect(() => { const t = setTimeout(fetchItems, 400); return () => clearTimeout(t); }, [search]);
@@ -394,11 +444,34 @@ export default function InventoryPage() {
                     {act.type === 'purchase' ? <ShoppingCart size={13} /> : act.type === 'sale' ? <Package size={13} /> : act.type === 'waste' ? <XCircle size={13} /> : act.type === 'transfer' ? <Shuffle size={13} /> : <Settings2 size={13} />}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium capitalize">{act.type.replace('_',' ')}</p>
-                    <p className="text-[10px] text-text-muted">By {act.performed_by_name}</p>
-                    <p className="text-[10px] text-text-muted">{new Date(act.created_at).toLocaleDateString()}</p>
+                    <p className="text-xs font-medium">{activityLabel(act)}</p>
+                    {editingActivityId === act.id ? (
+                      <div className="flex items-center gap-1 mt-1">
+                        <input
+                          autoFocus
+                          value={editingNotesValue}
+                          onChange={e => setEditingNotesValue(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') saveActivityNotes(act.id); if (e.key === 'Escape') setEditingActivityId(null); }}
+                          disabled={savingNotes}
+                          placeholder="Reason for this…"
+                          className="input text-[10px] py-1 flex-1 disabled:opacity-50"
+                        />
+                        <button onClick={() => saveActivityNotes(act.id)} disabled={savingNotes} className="text-brand text-[10px] font-medium shrink-0 disabled:opacity-50">Save</button>
+                        <button onClick={() => setEditingActivityId(null)} className="btn-ghost p-0.5 shrink-0"><X size={11} /></button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => startEditingActivityNotes(act)}
+                        disabled={!canManage}
+                        className={`text-left text-[11px] mt-0.5 ${act.notes ? 'text-text-secondary' : 'text-text-muted italic'} ${canManage ? 'hover:text-brand cursor-pointer' : 'cursor-default'}`}
+                        title={canManage ? 'Click to edit the reason' : undefined}
+                      >
+                        {act.notes || (canManage ? 'Add a reason…' : 'No reason given')}
+                      </button>
+                    )}
+                    <p className="text-[10px] text-text-muted mt-0.5">By {act.performed_by_name} · {new Date(act.created_at).toLocaleDateString()}</p>
                   </div>
-                  <span className={`text-xs font-bold ${act.quantity_change > 0 ? 'text-status-success' : 'text-status-error'}`}>
+                  <span className={`text-xs font-bold shrink-0 ${act.quantity_change > 0 ? 'text-status-success' : 'text-status-error'}`}>
                     {act.quantity_change > 0 ? '+' : ''}{act.quantity_change} {selected?.unit}
                   </span>
                 </div>
