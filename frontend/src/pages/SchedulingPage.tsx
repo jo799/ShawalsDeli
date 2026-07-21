@@ -1,18 +1,30 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Printer, Plus, Copy, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Printer, Plus, Copy, X, Clock, LogIn, LogOut, Stethoscope, Upload, Bell, BellOff, CalendarOff, Check } from 'lucide-react';
 import { addDays, startOfWeek, format, isSameDay, addWeeks, subWeeks, subDays, addMonths, subMonths } from 'date-fns';
 import api from '@/lib/api';
 import { getInitials } from '@/lib/utils';
 import { PageHeader } from '@/components/ui';
+import { useAuthStore } from '@/store/authStore';
+import { getPushSubscriptionStatus, subscribeToKitchenAlerts, unsubscribeFromKitchenAlerts } from '@/lib/pushNotifications';
 import toast from 'react-hot-toast';
 
 interface StaffMember {
-  id: string; full_name: string; role: string; avatar_url?: string;
+  id: string; full_name: string; role: string; avatar_url?: string; recurring_day_off?: number | null;
 }
 interface Schedule {
   user_id: string; shift_date: string; shift_type: string;
-  start_time?: string; end_time?: string; role_label?: string;
+  start_time?: string; end_time?: string; role_label?: string; is_recurring?: boolean;
 }
+interface Attendance {
+  id: string; check_in_time?: string | null; check_out_time?: string | null;
+}
+interface SickOffRequest {
+  id: string; user_id: string; requested_date: string; message: string; receipt_url?: string;
+  status: 'pending' | 'approved' | 'declined'; requested_by_name?: string; requested_by_role?: string;
+  reviewed_by_name?: string; decline_reason?: string; created_at: string;
+}
+
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const SHIFT_COLORS: Record<string, string> = {
   morning: 'bg-status-success/20 text-status-success border border-status-success/30',
@@ -48,6 +60,9 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 export default function SchedulingPage() {
+  const { user } = useAuthStore();
+  const canManage = user?.role === 'administrator' || user?.role === 'manager';
+  const isAdmin = user?.role === 'administrator';
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
@@ -59,6 +74,30 @@ export default function SchedulingPage() {
   const [copying, setCopying] = useState(false);
   const [addForm, setAddForm] = useState({ user_id: '', shift_date: '', shift_type: 'day' });
   const [savingAdd, setSavingAdd] = useState(false);
+
+  // Clock In/Out — every staff member sees this, regardless of role.
+  const [myAttendance, setMyAttendance] = useState<Attendance | null>(null);
+  const [clockBusy, setClockBusy] = useState(false);
+
+  // Recurring day off — admin/manager only.
+  const [editingRecurringOffFor, setEditingRecurringOffFor] = useState<string | null>(null);
+  const [savingRecurringOff, setSavingRecurringOff] = useState(false);
+
+  // Sick-off requests — the modal any staff member uses to submit one, plus
+  // their own request history, plus the admin-only review queue.
+  const [showSickOffModal, setShowSickOffModal] = useState(false);
+  const [sickOffDate, setSickOffDate] = useState('');
+  const [sickOffMessage, setSickOffMessage] = useState('');
+  const [sickOffReceipt, setSickOffReceipt] = useState<File | null>(null);
+  const [submittingSickOff, setSubmittingSickOff] = useState(false);
+  const [myRequests, setMyRequests] = useState<SickOffRequest[]>([]);
+  const [showMyRequests, setShowMyRequests] = useState(false);
+  const [reviewQueue, setReviewQueue] = useState<SickOffRequest[]>([]);
+  const [showReviewPanel, setShowReviewPanel] = useState(false);
+  const [decliningRequestId, setDecliningRequestId] = useState<string | null>(null);
+  const [declineReasonInput, setDeclineReasonInput] = useState('');
+  const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
+  const [pushStatus, setPushStatus] = useState<'subscribed' | 'unsubscribed' | 'unsupported' | 'denied' | 'loading'>('loading');
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
@@ -79,14 +118,167 @@ export default function SchedulingPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // Clock In/Out — every staff member's own status, fetched regardless of role.
+  const fetchMyAttendance = useCallback(async () => {
+    try {
+      const { data } = await api.get('/staff/attendance/me');
+      setMyAttendance(data.data);
+    } catch { /* non-critical */ }
+  }, []);
+  useEffect(() => { fetchMyAttendance(); }, [fetchMyAttendance]);
+
+  const handleCheckIn = async () => {
+    setClockBusy(true);
+    try {
+      const { data } = await api.post('/staff/attendance/check-in');
+      toast.success(data.message || 'Checked in');
+      fetchMyAttendance();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not check in';
+      toast.error(msg);
+    } finally { setClockBusy(false); }
+  };
+
+  const handleCheckOut = async () => {
+    setClockBusy(true);
+    try {
+      const { data } = await api.post('/staff/attendance/check-out');
+      toast.success(data.message || 'Checked out');
+      fetchMyAttendance();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not check out';
+      toast.error(msg);
+    } finally { setClockBusy(false); }
+  };
+
+  // Recurring day off — admin/manager only.
+  const saveRecurringDayOff = async (userId: string, dayOfWeek: number | null) => {
+    setSavingRecurringOff(true);
+    try {
+      await api.put(`/staff/${userId}/recurring-day-off`, { recurring_day_off: dayOfWeek });
+      toast.success(dayOfWeek === null ? 'Recurring day off cleared' : `Recurring day off set to ${DAY_NAMES[dayOfWeek]}`);
+      setEditingRecurringOffFor(null);
+      fetchData();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not update recurring day off';
+      toast.error(msg);
+    } finally { setSavingRecurringOff(false); }
+  };
+
+  // Sick-off requests — own history (everyone) and the review queue
+  // (admin only, matches the backend restriction).
+  const fetchMyRequests = useCallback(async () => {
+    try {
+      const { data } = await api.get('/sick-off-requests/mine');
+      setMyRequests(data.data);
+    } catch { /* non-critical */ }
+  }, []);
+  useEffect(() => { fetchMyRequests(); }, [fetchMyRequests]);
+
+  const fetchReviewQueue = useCallback(async () => {
+    if (!isAdmin) return;
+    try {
+      const { data } = await api.get('/sick-off-requests', { params: { status: 'pending' } });
+      setReviewQueue(data.data);
+    } catch { /* non-critical */ }
+  }, [isAdmin]);
+  useEffect(() => {
+    fetchReviewQueue();
+    const interval = setInterval(fetchReviewQueue, 30000);
+    return () => clearInterval(interval);
+  }, [fetchReviewQueue]);
+
+  useEffect(() => { if (isAdmin) getPushSubscriptionStatus().then(setPushStatus); }, [isAdmin]);
+
+  const handleTogglePush = async () => {
+    if (pushStatus === 'subscribed') {
+      await unsubscribeFromKitchenAlerts();
+      setPushStatus('unsubscribed');
+      toast.success('Sick-off request alerts turned off on this device');
+      return;
+    }
+    if (pushStatus === 'denied') {
+      toast.error('Notifications are blocked for this site. Check your browser/phone settings, then reload and try again.', { duration: 7000 });
+      return;
+    }
+    setPushStatus('loading');
+    const result = await subscribeToKitchenAlerts();
+    if (result.success) {
+      setPushStatus('subscribed');
+      toast.success('This device will now get a notification for every sick-off request');
+    } else {
+      setPushStatus(await getPushSubscriptionStatus());
+      toast.error(result.message || 'Could not enable phone alerts', { duration: 7000 });
+    }
+  };
+
+  const submitSickOffRequest = async () => {
+    if (!sickOffDate) { toast.error('Choose the date you need off'); return; }
+    if (!sickOffMessage.trim()) { toast.error('Add a short message explaining the request'); return; }
+    setSubmittingSickOff(true);
+    try {
+      const form = new FormData();
+      form.append('requested_date', sickOffDate);
+      form.append('message', sickOffMessage.trim());
+      if (sickOffReceipt) form.append('receipt', sickOffReceipt);
+      const { data } = await api.post('/sick-off-requests', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      toast.success(data.message || 'Request submitted');
+      setShowSickOffModal(false);
+      setSickOffDate(''); setSickOffMessage(''); setSickOffReceipt(null);
+      fetchMyRequests();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not submit the request';
+      toast.error(msg);
+    } finally { setSubmittingSickOff(false); }
+  };
+
+  const approveSickOff = async (r: SickOffRequest) => {
+    if (!confirm(`Approve ${r.requested_by_name}'s sick-off request for ${format(new Date(r.requested_date), 'MMM d, yyyy')}? This will mark that day off in their schedule.`)) return;
+    setProcessingRequestId(r.id);
+    try {
+      const { data } = await api.post(`/sick-off-requests/${r.id}/approve`);
+      toast.success(data.message || 'Request approved');
+      fetchReviewQueue();
+      fetchData();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not approve';
+      toast.error(msg);
+    } finally { setProcessingRequestId(null); }
+  };
+
+  const declineSickOff = async (r: SickOffRequest) => {
+    setProcessingRequestId(r.id);
+    try {
+      const { data } = await api.post(`/sick-off-requests/${r.id}/decline`, { decline_reason: declineReasonInput.trim() || undefined });
+      toast.success(data.message || 'Request declined');
+      setDecliningRequestId(null);
+      setDeclineReasonInput('');
+      fetchReviewQueue();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not decline';
+      toast.error(msg);
+    } finally { setProcessingRequestId(null); }
+  };
+
   // Nothing scheduled for a cell used to silently show a made-up default
   // shift (e.g. every waiter always "on evening shift" even if no one had
   // ever actually scheduled them) — indistinguishable from a real
   // assignment. Returns null now instead, and the grid shows an honest
-  // "Unscheduled" state for it.
-  const getShiftForDay = (userId: string, dayIdx: number): Schedule | null => {
-    const dateStr = format(weekDays[dayIdx], 'yyyy-MM-dd');
-    return schedules.find(s => s.user_id === userId && normalizeDate(s.shift_date) === dateStr) || null;
+  // "Unscheduled" state for it — UNLESS the staff member has a recurring
+  // day off set for this exact day of the week, in which case that's what
+  // actually applies by default. A real, explicit staff_schedules row for
+  // this date (someone covering that day, or an approved sick-off day
+  // already written as a genuine row) always takes precedence over this
+  // synthetic fallback — see the explicit-entry check first, below.
+  const getShiftForDay = (member: StaffMember, dayIdx: number): Schedule | null => {
+    const day = weekDays[dayIdx];
+    const dateStr = format(day, 'yyyy-MM-dd');
+    const explicit = schedules.find(s => s.user_id === member.id && normalizeDate(s.shift_date) === dateStr);
+    if (explicit) return explicit;
+    if (member.recurring_day_off !== null && member.recurring_day_off !== undefined && day.getDay() === member.recurring_day_off) {
+      return { user_id: member.id, shift_date: dateStr, shift_type: 'off', role_label: 'Recurring Day Off', is_recurring: true };
+    }
+    return null;
   };
 
   const getShiftTime = (s: Schedule): string => {
@@ -208,7 +400,7 @@ export default function SchedulingPage() {
     const rows = [['Staff Member', 'Role', 'Date', 'Shift', 'Start', 'End']];
     filteredStaff.forEach(member => {
       weekDays.forEach((_, dayIdx) => {
-        const s = getShiftForDay(member.id, dayIdx);
+        const s = getShiftForDay(member, dayIdx);
         if (s) rows.push([member.full_name, ROLE_LABEL[member.role] || member.role, normalizeDate(s.shift_date), s.shift_type, s.start_time || '', s.end_time || '']);
       });
     });
@@ -225,12 +417,72 @@ export default function SchedulingPage() {
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
       <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Scheduling" subtitle="Create and manage staff schedules and shifts">
+          {isAdmin && pushStatus !== 'unsupported' && (
+            <button
+              onClick={handleTogglePush}
+              disabled={pushStatus === 'loading'}
+              title={pushStatus === 'denied' ? 'Notifications blocked — enable them in your browser/phone settings' : 'Get a phone notification the moment a sick-off request comes in'}
+              className={`btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50 ${pushStatus === 'subscribed' ? 'border-status-success/40 text-status-success' : pushStatus === 'denied' ? 'border-status-warning/40 text-status-warning' : ''}`}
+            >
+              {pushStatus === 'subscribed' ? <Bell size={14} /> : <BellOff size={14} />}
+              <span className="hidden lg:inline">{pushStatus === 'loading' ? 'Loading…' : pushStatus === 'subscribed' ? 'Alerts ON' : 'Enable alerts'}</span>
+            </button>
+          )}
+          {isAdmin && (
+            <button onClick={() => setShowReviewPanel(true)} className="btn-secondary flex items-center gap-1.5 text-sm relative">
+              <Stethoscope size={14} /> <span className="hidden sm:inline">Sick-Off Requests</span>
+              {reviewQueue.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-status-warning rounded-full text-[10px] font-bold flex items-center justify-center text-black">
+                  {reviewQueue.length}
+                </span>
+              )}
+            </button>
+          )}
+          <button onClick={() => setShowMyRequests(true)} className="btn-secondary flex items-center gap-1.5 text-sm">My Requests</button>
+          <button onClick={() => setShowSickOffModal(true)} className="btn-secondary flex items-center gap-1.5 text-sm"><Stethoscope size={14} /> <span className="hidden sm:inline">Request Sick Off</span></button>
           <button onClick={exportCsv} className="btn-secondary flex items-center gap-1.5 text-sm">Export CSV</button>
           <button onClick={() => window.print()} className="btn-secondary flex items-center gap-1.5 text-sm"><Printer size={13} /> Print</button>
-          <button onClick={() => { setAddForm({ user_id: '', shift_date: format(weekStart, 'yyyy-MM-dd'), shift_type: 'day' }); setShowAddShift(true); }} className="btn-primary flex items-center gap-2 text-sm">
-            <Plus size={14} /> Create Schedule
-          </button>
+          {canManage && (
+            <button onClick={() => { setAddForm({ user_id: '', shift_date: format(weekStart, 'yyyy-MM-dd'), shift_type: 'day' }); setShowAddShift(true); }} className="btn-primary flex items-center gap-2 text-sm">
+              <Plus size={14} /> Create Schedule
+            </button>
+          )}
         </PageHeader>
+
+        {/* Clock In/Out — every staff member sees this, since scheduling.view
+            is granted to every role. Own status only; this isn't a
+            management tool, it's the thing each person uses on themselves
+            every day. */}
+        <div className="card p-3 mb-4 flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2 text-sm">
+            <Clock size={16} className="text-brand" />
+            {myAttendance?.check_in_time && myAttendance?.check_out_time ? (
+              <span className="text-text-secondary">
+                Checked in <span className="font-semibold text-text-primary">{format(new Date(myAttendance.check_in_time), 'h:mm a')}</span> · out <span className="font-semibold text-text-primary">{format(new Date(myAttendance.check_out_time), 'h:mm a')}</span> today
+              </span>
+            ) : myAttendance?.check_in_time ? (
+              <span className="text-text-secondary">Checked in at <span className="font-semibold text-status-success">{format(new Date(myAttendance.check_in_time), 'h:mm a')}</span> — not checked out yet</span>
+            ) : (
+              <span className="text-text-muted">You haven't checked in today</span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleCheckIn}
+              disabled={clockBusy || !!myAttendance?.check_in_time}
+              className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 disabled:opacity-40"
+            >
+              <LogIn size={13} /> Check In
+            </button>
+            <button
+              onClick={handleCheckOut}
+              disabled={clockBusy || !myAttendance?.check_in_time || !!myAttendance?.check_out_time}
+              className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 disabled:opacity-40"
+            >
+              <LogOut size={13} /> Check Out
+            </button>
+          </div>
+        </div>
 
         {/* Stats — every number here is real */}
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
@@ -293,11 +545,34 @@ export default function SchedulingPage() {
                       <div className="min-w-0">
                         <p className="text-xs font-semibold truncate">{member.full_name}</p>
                         <p className="text-[10px] text-text-muted capitalize">{ROLE_LABEL[member.role] || member.role}</p>
+                        {editingRecurringOffFor === member.id ? (
+                          <select
+                            autoFocus
+                            disabled={savingRecurringOff}
+                            defaultValue={member.recurring_day_off ?? ''}
+                            onChange={e => saveRecurringDayOff(member.id, e.target.value === '' ? null : Number(e.target.value))}
+                            onBlur={() => setEditingRecurringOffFor(null)}
+                            className="select text-[10px] py-0.5 mt-0.5 w-full disabled:opacity-50"
+                          >
+                            <option value="">No recurring day off</option>
+                            {DAY_NAMES.map((d, i) => <option key={i} value={i}>{d}</option>)}
+                          </select>
+                        ) : (
+                          <button
+                            onClick={() => canManage && setEditingRecurringOffFor(member.id)}
+                            disabled={!canManage}
+                            className={`flex items-center gap-1 text-[10px] mt-0.5 ${canManage ? 'text-brand hover:text-brand-400 cursor-pointer' : 'text-text-muted cursor-default'}`}
+                            title={canManage ? 'Click to set a recurring weekly day off' : undefined}
+                          >
+                            <CalendarOff size={10} />
+                            {member.recurring_day_off !== null && member.recurring_day_off !== undefined ? `Off every ${DAY_NAMES[member.recurring_day_off]}` : 'No recurring day off'}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </td>
                   {weekDays.map((_, dayIdx) => {
-                    const entry = getShiftForDay(member.id, dayIdx);
+                    const entry = getShiftForDay(member, dayIdx);
                     const isEditing = editingCell?.userId === member.id && editingCell?.dayIdx === dayIdx;
                     return (
                       <td key={dayIdx} className="px-1.5 py-2 text-center relative">
@@ -317,7 +592,7 @@ export default function SchedulingPage() {
                               <option value="night">Night 3PM-11PM</option>
                               <option value="off">Off</option>
                             </select>
-                            {entry && (
+                            {entry && !entry.is_recurring && (
                               <button onMouseDown={e => e.preventDefault()} onClick={() => clearShift(member.id, dayIdx)} className="btn-ghost p-1 text-status-error shrink-0" title="Remove this schedule entry entirely">
                                 <X size={12} />
                               </button>
@@ -326,7 +601,7 @@ export default function SchedulingPage() {
                         ) : (
                           <button
                             onClick={() => setEditingCell({ userId: member.id, dayIdx })}
-                            className={`w-full rounded-lg px-1.5 py-1.5 text-[10px] font-medium text-center transition-all hover:opacity-80 ${entry ? (SHIFT_COLORS[entry.shift_type] || SHIFT_COLORS.off) : 'border border-dashed border-border text-text-muted'}`}
+                            className={`w-full rounded-lg px-1.5 py-1.5 text-[10px] font-medium text-center transition-all hover:opacity-80 ${entry ? (SHIFT_COLORS[entry.shift_type] || SHIFT_COLORS.off) : 'border border-dashed border-border text-text-muted'} ${entry?.is_recurring ? 'border-dashed opacity-80' : ''}`}
                           >
                             {!entry ? (
                               <span>Unscheduled</span>
@@ -336,7 +611,7 @@ export default function SchedulingPage() {
                                 <div className="opacity-80">{entry.role_label || ROLE_LABEL[member.role]}</div>
                               </>
                             ) : (
-                              <span>Off</span>
+                              <span>{entry.role_label || 'Off'}</span>
                             )}
                           </button>
                         )}
@@ -429,6 +704,151 @@ export default function SchedulingPage() {
                   {savingAdd ? 'Creating…' : 'Create'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Request Sick Off — any staff member */}
+      {showSickOffModal && (
+        <div className="modal-backdrop" onClick={() => setShowSickOffModal(false)}>
+          <div className="modal max-w-sm" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-border flex items-center justify-between">
+              <h2 className="section-title flex items-center gap-2"><Stethoscope size={16} /> Request Sick Off</h2>
+              <button onClick={() => setShowSickOffModal(false)} className="btn-ghost p-1"><X size={16} /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Date you need off</label>
+                <input type="date" className="input" value={sickOffDate} onChange={e => setSickOffDate(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Message *</label>
+                <textarea
+                  rows={3}
+                  className="input w-full resize-none"
+                  placeholder="Briefly explain what's going on…"
+                  value={sickOffMessage}
+                  onChange={e => setSickOffMessage(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Hospital receipt / note (optional for now, can add later)</label>
+                <label className="btn-secondary w-full flex items-center justify-center gap-2 text-sm cursor-pointer">
+                  <Upload size={14} /> {sickOffReceipt ? sickOffReceipt.name : 'Choose a file…'}
+                  <input
+                    type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden"
+                    onChange={e => setSickOffReceipt(e.target.files?.[0] || null)}
+                  />
+                </label>
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button onClick={() => setShowSickOffModal(false)} className="btn-secondary flex-1">Cancel</button>
+                <button onClick={submitSickOffRequest} disabled={submittingSickOff} className="btn-primary flex-1 disabled:opacity-50">
+                  {submittingSickOff ? 'Submitting…' : 'Submit Request'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* My Requests — own history, so a staff member can track whether
+          theirs has been reviewed yet without needing admin access. */}
+      {showMyRequests && (
+        <div className="modal-backdrop" onClick={() => setShowMyRequests(false)}>
+          <div className="modal max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-border flex items-center justify-between">
+              <h2 className="section-title">My Sick-Off Requests</h2>
+              <button onClick={() => setShowMyRequests(false)} className="btn-ghost p-1"><X size={16} /></button>
+            </div>
+            <div className="p-5 space-y-3 max-h-[60vh] overflow-y-auto">
+              {myRequests.length === 0 ? (
+                <p className="text-sm text-text-muted text-center py-8">You haven't requested a sick-off day yet.</p>
+              ) : myRequests.map(r => (
+                <div key={r.id} className="border border-border rounded-xl p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-sm">{format(new Date(r.requested_date), 'EEEE, MMM d, yyyy')}</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      r.status === 'approved' ? 'bg-status-success/10 text-status-success' :
+                      r.status === 'declined' ? 'bg-status-error/10 text-status-error' :
+                      'bg-status-warning/10 text-status-warning'
+                    }`}>{r.status.toUpperCase()}</span>
+                  </div>
+                  <p className="text-xs text-text-secondary">"{r.message}"</p>
+                  {r.receipt_url && <a href={r.receipt_url} target="_blank" rel="noreferrer" className="text-xs text-brand hover:underline">View uploaded receipt</a>}
+                  {r.status === 'declined' && r.decline_reason && (
+                    <p className="text-xs text-status-error">Reason: {r.decline_reason}</p>
+                  )}
+                  {r.reviewed_by_name && <p className="text-[10px] text-text-muted">Reviewed by {r.reviewed_by_name}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin review queue */}
+      {showReviewPanel && (
+        <div className="modal-backdrop" onClick={() => setShowReviewPanel(false)}>
+          <div className="modal max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-border flex items-center justify-between">
+              <h2 className="section-title">Pending Sick-Off Requests</h2>
+              <button onClick={() => setShowReviewPanel(false)} className="btn-ghost p-1"><X size={16} /></button>
+            </div>
+            <div className="p-5 space-y-3 max-h-[60vh] overflow-y-auto">
+              {reviewQueue.length === 0 ? (
+                <p className="text-sm text-text-muted text-center py-8">No requests waiting on you.</p>
+              ) : reviewQueue.map(r => (
+                <div key={r.id} className="border border-border rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-sm">{r.requested_by_name}</span>
+                    <span className="text-xs text-text-muted">{format(new Date(r.requested_date), 'EEE, MMM d')}</span>
+                  </div>
+                  <p className="text-xs text-text-secondary">"{r.message}"</p>
+                  {r.receipt_url && <a href={r.receipt_url} target="_blank" rel="noreferrer" className="text-xs text-brand hover:underline flex items-center gap-1"><Upload size={11} /> View receipt</a>}
+                  <p className="text-[10px] text-text-muted">Submitted {format(new Date(r.created_at), 'MMM d, h:mm a')}</p>
+
+                  {decliningRequestId === r.id ? (
+                    <div className="space-y-2 pt-1">
+                      <input
+                        type="text" autoFocus
+                        value={declineReasonInput}
+                        onChange={e => setDeclineReasonInput(e.target.value)}
+                        placeholder="Why decline? (optional, shown to them)"
+                        className="input text-xs"
+                      />
+                      <div className="flex gap-2">
+                        <button onClick={() => { setDecliningRequestId(null); setDeclineReasonInput(''); }} className="btn-secondary flex-1 text-xs py-1.5">Cancel</button>
+                        <button
+                          onClick={() => declineSickOff(r)}
+                          disabled={processingRequestId === r.id}
+                          className="btn-primary flex-1 text-xs py-1.5 text-status-error disabled:opacity-50"
+                        >
+                          {processingRequestId === r.id ? 'Declining…' : 'Confirm Decline'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => setDecliningRequestId(r.id)}
+                        disabled={processingRequestId === r.id}
+                        className="btn-secondary flex-1 text-xs py-1.5 disabled:opacity-50"
+                      >
+                        Decline
+                      </button>
+                      <button
+                        onClick={() => approveSickOff(r)}
+                        disabled={processingRequestId === r.id}
+                        className="flex-1 text-xs py-1.5 rounded-lg bg-status-success/10 text-status-success border border-status-success/30 hover:bg-status-success/20 transition-colors disabled:opacity-50 font-medium flex items-center justify-center gap-1"
+                      >
+                        <Check size={12} /> {processingRequestId === r.id ? 'Approving…' : 'Approve'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         </div>
