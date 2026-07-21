@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Filter, Edit2, ArrowLeftRight, Trash2, X, RefreshCw, Wheat, Beef, Droplet, Carrot, Flame, Cookie, Milk, Package, ShoppingCart, XCircle, Shuffle, Settings2, Wallet, AlertTriangle } from 'lucide-react';
+import { Plus, Search, Filter, Edit2, ArrowLeftRight, Trash2, X, RefreshCw, Wheat, Beef, Droplet, Carrot, Flame, Cookie, Milk, Package, ShoppingCart, XCircle, Shuffle, Settings2, Wallet, AlertTriangle, Download } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency, formatDate, toLocalDateString } from '@/lib/utils';
 import { PageHeader, Pagination, Modal, LoadingPage } from '@/components/ui';
 import { useAuthStore } from '@/store/authStore';
 import toast from 'react-hot-toast';
@@ -114,6 +114,38 @@ export default function InventoryPage() {
     } catch { toast.error('Failed to load inventory'); }
     finally { setLoading(false); }
   }, [search, categoryFilter, statusFilter, page]);
+
+  // Exports every matching item, not just the current page — `items` only
+  // ever holds 10 rows at a time (see fetchItems above), and a stock-take
+  // or accounting export that silently dropped everything past page 1
+  // would be far less useful than what this is actually for.
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const exportCsv = async () => {
+    setExportingCsv(true);
+    try {
+      const { data } = await api.get('/inventory', {
+        params: { search: search || undefined, category: categoryFilter || undefined, status: statusFilter || undefined, limit: 10000 }
+      });
+      const all: InventoryItem[] = data.data;
+      const rows = [['SKU', 'Name', 'Category', 'Supplier', 'Quantity', 'Unit', 'Cost Per Unit', 'Stock Value', 'Reorder Level', 'Stock Status', 'Expiry Date', 'Location']];
+      all.forEach(i => rows.push([
+        i.sku, i.name, i.category || '', i.supplier_name || '',
+        String(i.quantity), i.unit, String(i.cost_per_unit), String(i.stock_value),
+        String(i.reorder_level), i.stock_status.replace(/_/g, ' '), i.expiry_date?.slice(0, 10) || '', i.location || '',
+      ]));
+      const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `inventory-${toLocalDateString()}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Failed to export inventory');
+    } finally {
+      setExportingCsv(false);
+    }
+  };
 
   const fetchActivity = useCallback(async (itemId?: string, limit = 5) => {
     try {
@@ -251,6 +283,9 @@ export default function InventoryPage() {
       {/* Main content */}
       <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Inventory" subtitle="Track and manage your stock items in real-time">
+          <button onClick={exportCsv} disabled={exportingCsv} className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50">
+            <Download size={13} /> {exportingCsv ? 'Exporting…' : 'Export CSV'}
+          </button>
           <button onClick={() => { if (selected) setShowAdjust(true); else toast.error('Select an item first'); }}
             className="btn-secondary flex items-center gap-2 text-sm">
             <ArrowLeftRight size={14} /> Adjust Stock
