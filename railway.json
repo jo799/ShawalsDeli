@@ -1,8 +1,9 @@
 {
   "build": {
-    "builder": "RAILPACK"
+    "builder": "NIXPACKS",
+    "buildCommand": "npm ci && npm run build:frontend"
   },
   "deploy": {
-    "startCommand": "npm run start --workspace=shawalsdeli-frontend"
+    "startCommand": "cd frontend && npm run start"
   }
 }
