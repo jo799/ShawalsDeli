@@ -11,6 +11,16 @@ RUN npm ci
 
 COPY frontend ./frontend
 COPY shared ./shared
+
+# Vite bakes VITE_* variables into the compiled bundle at build time, not
+# read at runtime the way a normal backend env var would be. Since this
+# build now happens inside the Docker build itself, Railway's dashboard
+# Variables aren't visible here unless explicitly declared as a build ARG -
+# this is that declaration, plus exporting it as a real env var so the
+# `npm run build` step below actually sees it.
+ARG VITE_API_URL
+ENV VITE_API_URL=$VITE_API_URL
+
 RUN cd frontend && npm run build
 
 FROM nginx:alpine AS production
@@ -21,7 +31,7 @@ FROM nginx:alpine AS production
 # deterministically, since Docker always treats a changed ARG as a reason
 # to rebuild every subsequent layer. Bump this number any time a deploy
 # needs to be guaranteed fresh.
-ARG CACHEBUST=3
+ARG CACHEBUST=4
 RUN echo "cachebust: $CACHEBUST"
 
 COPY --from=builder /app/frontend/dist /usr/share/nginx/html
