@@ -1,9 +1,9 @@
 {
   "build": {
-    "builder": "DOCKERFILE",
-    "dockerfilePath": "frontend/Dockerfile"
+    "builder": "NIXPACKS",
+    "buildCommand": "npm ci && npm run build:frontend"
   },
   "deploy": {
-    "startCommand": "nginx -g 'daemon off;'"
+    "startCommand": "cd frontend && npm run start"
   }
 }
