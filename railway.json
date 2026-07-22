@@ -1,8 +1,6 @@
 {
   "build": {
-    "builder": "RAILPACK"
-  },
-  "deploy": {
-    "startCommand": "npm run start --workspace=shawalsdeli-frontend"
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "frontend/Dockerfile"
   }
 }
