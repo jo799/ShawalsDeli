@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   ShoppingCart, ClipboardList, Users, TrendingUp,
   Package, AlertTriangle, ArrowUpRight, ArrowDownRight,
-  DollarSign, ChefHat, Star, Ban
+  DollarSign, ChefHat, Star, Ban, Download, Loader2, ChevronDown
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip,
@@ -12,6 +12,7 @@ import api from '@/lib/api';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { formatCurrency, formatTime, toLocalDateString } from '@/lib/utils';
 import { StatusBadge } from '@/components/ui';
+import toast from 'react-hot-toast';
 
 const COLORS = ['#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#EF4444'];
 
@@ -77,6 +78,8 @@ export default function DashboardPage() {
   // today/this week/this month, rather than it being locked to a month
   // the way it originally was.
   const [expensesPeriod, setExpensesPeriod] = useState<'today' | 'week' | 'month'>('month');
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportingPeriod, setExportingPeriod] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -135,6 +138,69 @@ export default function DashboardPage() {
     load();
   }, [expensesPeriod]);
 
+  // Every figure explained in plain language right next to its value, since
+  // a raw number in a spreadsheet six months from now won't remind anyone
+  // what "Cash Position" actually means or how it differs from "Net
+  // Profit". Sections mirror how the Business Health card itself groups
+  // things, so the export reads the same way the dashboard looks.
+  const exportDashboardCsv = async (period: 'day' | 'week' | 'month' | 'year') => {
+    setExportingPeriod(period);
+    setShowExportMenu(false);
+    try {
+      const { data } = await api.get('/reports/dashboard-export', { params: { period } });
+      const d = data.data;
+
+      const rows: string[][] = [
+        ['Metric', 'Value', 'How it is calculated'],
+        [`${d.period_label} Report`, `${d.start_date} to ${d.end_date}`, ''],
+        ['', '', ''],
+        ['REVENUE & PROFIT', '', ''],
+        ['Revenue (Total Sales)', formatCurrency(d.revenue), 'Total value of every completed order in this period'],
+        ['Total Discounts Given', formatCurrency(d.total_discounts), 'Sum of all discounts applied to orders in this period'],
+        ['Net Sales', formatCurrency(d.net_sales), 'Revenue minus total discounts'],
+        ['Cost of Goods Sold (COGS)', formatCurrency(d.cogs), "Ingredient cost of everything sold, based on each menu item's recipe"],
+        ['Gross Profit', formatCurrency(d.gross_profit), 'Net Sales minus Cost of Goods Sold'],
+        ['Gross Profit Margin', `${d.gross_profit_margin}%`, 'Gross Profit as a percentage of Net Sales'],
+        ['Total Expenses', formatCurrency(d.total_expenses), 'All operating expenses logged in this period (rent, utilities, supplies, etc.) - not including purchase orders'],
+        ['Net Profit', formatCurrency(d.net_profit), 'Gross Profit minus Total Expenses - the real bottom line after all costs'],
+        ['Net Profit Margin', `${d.net_profit_margin}%`, 'Net Profit as a percentage of Net Sales'],
+        ['', '', ''],
+        ['CASH & INVENTORY', '', ''],
+        ['Cash Position', formatCurrency(d.cash_position), 'Cash-method payments received in this period, minus expenses and any purchase order paid in full during the same period'],
+        ['Inventory Value', formatCurrency(d.inventory_value), 'Current stock quantity x cost per unit, for all active items - a live snapshot as of now, not scoped to this period'],
+        ['', '', ''],
+        ['PURCHASES & WASTE', '', ''],
+        ['Total Purchases', formatCurrency(d.purchases_total), 'Total value of all non-cancelled purchase orders placed in this period'],
+        ['Waste Cost', formatCurrency(d.waste_cost), 'Cost of everything logged as waste or spoilage in this period, valued at current cost per unit'],
+        ['Food Cost %', `${d.food_cost_pct}%`, 'Cost of Goods Sold as a percentage of Net Sales - the standard restaurant efficiency measure (lower is generally better)'],
+        ['', '', ''],
+        ['SALES DETAIL', '', ''],
+        ['Total Orders', String(d.total_orders), 'Number of completed orders in this period'],
+        ['Average Order Value', formatCurrency(d.avg_order_value), 'Revenue divided by number of orders'],
+        ['Top Profitable Item', d.top_profitable_item ? d.top_profitable_item.name : 'No sales in this period', d.top_profitable_item ? `Contributed ${formatCurrency(d.top_profitable_item.profit)} in actual profit this period - sorted by profit, not revenue` : ''],
+        ['', '', ''],
+        ['LIVE SNAPSHOT (as of right now, not scoped to this period)', '', ''],
+        ['Active Customers', String(d.active_customers), 'Customers currently marked active'],
+        ['Low Stock Items', String(d.low_stock_items), 'Inventory items currently at or below their reorder level'],
+        ['Unavailable Menu Items', String(d.unavailable_menu_items), 'Menu items currently marked unavailable or out of stock'],
+        ['Pending Orders', String(d.pending_orders), 'Orders currently in New or Preparing status'],
+      ];
+
+      const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `dashboard-${period}-${toLocalDateString()}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`${d.period_label} report downloaded`);
+    } catch {
+      toast.error('Failed to export dashboard report');
+    } finally {
+      setExportingPeriod(null);
+    }
+  };
+
   const kpis: Array<{
     label: string; value: string | number; icon: typeof DollarSign; iconBg: string; iconColor: string;
     pct?: number | null; pctLabel?: string; note?: string; notePositive?: boolean;
@@ -168,6 +234,33 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu(v => !v)}
+              disabled={!!exportingPeriod}
+              className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50"
+            >
+              {exportingPeriod ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              Export CSV
+              <ChevronDown size={14} />
+            </button>
+            {showExportMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowExportMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 w-40 bg-surface-card border border-border rounded-xl shadow-modal z-20 overflow-hidden">
+                  {([['day', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly'], ['year', 'Annually']] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      onClick={() => exportDashboardCsv(value)}
+                      className="w-full text-left px-4 py-2.5 text-sm hover:bg-surface-50 transition-colors"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <div className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full ${isOnline ? 'text-status-success bg-status-success/10' : 'text-status-error bg-status-error/10'}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-status-success animate-pulse' : 'bg-status-error'}`} />
             {isOnline ? 'System Online' : 'Offline'}
