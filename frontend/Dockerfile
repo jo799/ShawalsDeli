@@ -10,6 +10,7 @@ COPY frontend/package.json ./frontend/
 RUN npm ci
 
 COPY frontend ./frontend
+COPY shared ./shared
 RUN cd frontend && npm run build
 
 FROM nginx:alpine AS production
