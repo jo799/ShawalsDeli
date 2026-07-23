@@ -6,6 +6,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import LoginPage from '@/pages/LoginPage';
 import SignupPage from '@/pages/SignupPage';
 import ForgotPasswordPage from '@/pages/ForgotPasswordPage';
+import PaymentCallbackPage from '@/pages/PaymentCallbackPage';
 import DashboardPage from '@/pages/DashboardPage';
 import POSPage from '@/pages/POSPage';
 import OrdersPage from '@/pages/OrdersPage';
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/payment-callback" element={<PaymentCallbackPage />} />
           <Route path="/" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
             <Route index element={<DashboardPage />} />
             <Route path="pos" element={<POSPage />} />
