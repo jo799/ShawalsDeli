@@ -105,11 +105,22 @@ const helpSections: HelpSection[] = [
         ],
       },
       {
-        title: 'Pay with cash, card, or till',
+        title: 'Pay with cash or till',
         steps: [
-          'With items in the cart, tap Cash, Card, or Till (availability depends on Settings → POS).',
+          'With items in the cart, tap Cash or Till (availability depends on Settings → POS).',
           'For cash, enter the tender amount if you need change calculated.',
           'Confirm — the order is created and payment recorded in one step.',
+        ],
+      },
+      {
+        title: 'Pay with card (Visa / Mastercard via Pesapal)',
+        steps: [
+          'Tap Card at checkout (requires internet).',
+          'A secure Pesapal payment page opens on the same screen — hand the device to the customer to enter their card details there.',
+          'The screen automatically updates once the customer finishes; no manual confirmation step needed.',
+        ],
+        notes: [
+          'If the customer needs to step away, tap Close to cancel — nothing is charged unless the customer actually completes the card page.',
         ],
       },
       {
