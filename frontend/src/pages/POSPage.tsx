@@ -732,9 +732,12 @@ export default function POSPage() {
       if (!(amount > 0)) { setCardStatus('failed'); setCardError('Enter an amount to charge'); return; }
 
       setCardStatus('creating_order');
+      const [custFirstName, ...custLastNameParts] = (selectedCustomer?.full_name || '').split(' ');
       const orderRes = await api.post('/pesapal/create-order', {
         order_id: order.id, amount, award_loyalty: awardLoyalty,
         customer_phone: selectedCustomer?.phone,
+        customer_first_name: custFirstName || undefined,
+        customer_last_name: custLastNameParts.join(' ') || undefined,
       });
       const { redirect_url, order_tracking_id } = orderRes.data.data;
       orderTrackingIdRef.current = order_tracking_id;
