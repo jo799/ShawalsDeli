@@ -12,12 +12,13 @@ import toast from 'react-hot-toast';
 interface Expense {
   id: string; title: string; description?: string; category_id?: string; category_name?: string; category_color?: string;
   vendor?: string; amount: number; payment_method?: string; expense_date: string;
-  reference_no?: string; receipt_url?: string; created_by_name?: string;
+  reference_no?: string; receipt_url?: string; created_by_name?: string; funding_source?: string;
 }
 interface Category { id: string; name: string; color: string; }
 interface Stats {
   this_month_total: number; this_month_count: number; this_month_change_pct: number | null;
   average_per_day: number; over_budget_categories: Array<{ name: string; spent: number; budget_limit: number }>;
+  this_month_business_funded: number; this_month_owner_funded: number;
 }
 
 const COLORS = ['#3B82F6','#8B5CF6','#10B981','#F59E0B','#EF4444','#F97316','#14B8A6','#6B7280'];
@@ -30,7 +31,7 @@ const PAYMENT_METHOD_BADGE: Record<string, string> = {
 };
 const PAYMENT_METHODS = ['cash', 'mpesa', 'bank_transfer', 'card'];
 
-const EMPTY_FORM = { title: '', category_id: '', vendor: '', amount: '', payment_method: 'bank_transfer', expense_date: toLocalDateString(), notes: '', reference_no: '' };
+const EMPTY_FORM = { title: '', category_id: '', vendor: '', amount: '', payment_method: 'bank_transfer', expense_date: toLocalDateString(), notes: '', reference_no: '', funding_source: 'business' };
 
 export function ExpensesPage() {
   const { hasPermission } = useAuthStore();
@@ -83,7 +84,7 @@ export function ExpensesPage() {
     setForm({
       title: exp.title, category_id: exp.category_id || '', vendor: exp.vendor || '', amount: String(exp.amount),
       payment_method: exp.payment_method || 'bank_transfer', expense_date: exp.expense_date.slice(0, 10),
-      notes: exp.description || '', reference_no: exp.reference_no || '',
+      notes: exp.description || '', reference_no: exp.reference_no || '', funding_source: exp.funding_source || 'business',
     });
     setShowAdd(true);
   };
@@ -205,6 +206,16 @@ export function ExpensesPage() {
           ))}
         </div>
 
+        {(stats?.this_month_owner_funded ?? 0) > 0 && (
+          <div className="card p-3 mb-5 flex items-center justify-between flex-wrap gap-2 border-status-warning/30 bg-status-warning/5">
+            <div>
+              <p className="text-xs text-text-muted">Owner's Personal Contribution — This Month</p>
+              <p className="text-lg font-bold text-status-warning">{formatCurrency(stats?.this_month_owner_funded || 0)}</p>
+            </div>
+            <p className="text-xs text-text-muted">vs {formatCurrency(stats?.this_month_business_funded || 0)} from business funds</p>
+          </div>
+        )}
+
         {/* Filters — both now genuinely filter server-side */}
         <div className="flex items-center gap-3 mb-4">
           <SearchInput value={search} onChange={setSearch} placeholder="Search by expense name, category or vendor..." className="flex-1 max-w-sm" />
@@ -253,7 +264,12 @@ export function ExpensesPage() {
                           {exp.payment_method?.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                         </span>
                       </td>
-                      <td className="table-cell font-medium">{formatCurrency(exp.amount)}</td>
+                      <td className="table-cell font-medium">
+                        {formatCurrency(exp.amount)}
+                        {exp.funding_source === 'owner_personal' && (
+                          <span className="badge badge-muted text-[10px] ml-1.5 border-status-warning/30 text-status-warning" title="Paid from the owner's personal money">Owner</span>
+                        )}
+                      </td>
                       <td className="table-cell" onClick={e => e.stopPropagation()}>
                         {exp.receipt_url ? (
                           <a href={exp.receipt_url} target="_blank" rel="noreferrer" className="btn-ghost p-1 inline-flex" title="View receipt"><FileText size={14} className="text-status-info" /></a>
@@ -394,6 +410,25 @@ export function ExpensesPage() {
             </div>
             <div><label className="block text-xs text-text-muted mb-1">Date</label><input type="date" className="input" value={form.expense_date} onChange={e => setForm(p => ({...p, expense_date: e.target.value}))} /></div>
             <div><label className="block text-xs text-text-muted mb-1">Reference No.</label><input className="input" value={form.reference_no} onChange={e => setForm(p => ({...p, reference_no: e.target.value}))} placeholder="TXN-XXXXXX" /></div>
+            <div className="col-span-1 sm:col-span-2">
+              <label className="block text-xs text-text-muted mb-1">Who Paid For This?</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setForm(p => ({ ...p, funding_source: 'business' }))}
+                  className={`text-xs py-2 rounded-lg border transition-colors ${form.funding_source === 'business' ? 'border-brand bg-brand/10 text-brand font-medium' : 'border-border text-text-muted hover:text-text-primary'}`}
+                >
+                  Business Funds
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm(p => ({ ...p, funding_source: 'owner_personal' }))}
+                  className={`text-xs py-2 rounded-lg border transition-colors ${form.funding_source === 'owner_personal' ? 'border-brand bg-brand/10 text-brand font-medium' : 'border-border text-text-muted hover:text-text-primary'}`}
+                >
+                  Owner's Personal Money
+                </button>
+              </div>
+            </div>
             <div className="col-span-1 sm:col-span-2"><label className="block text-xs text-text-muted mb-1">Notes</label><textarea className="input" rows={2} value={form.notes} onChange={e => setForm(p => ({...p, notes: e.target.value}))} /></div>
           </div>
           <div className="flex gap-3 pt-2">

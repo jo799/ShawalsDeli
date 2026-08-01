@@ -11,7 +11,7 @@ interface PurchaseOrder {
   id: string; po_number: string; supplier_id: string; supplier_name?: string; supplier_phone?: string;
   status: string; order_date: string; expected_date?: string; received_date?: string;
   subtotal: number; discount: number; tax: number; total_amount: number;
-  payment_status: string; notes?: string; received_percentage?: number;
+  payment_status: string; funding_source?: string; notes?: string; received_percentage?: number;
   items?: POItem[];
 }
 interface POItem {
@@ -39,6 +39,7 @@ export default function PurchasesPage() {
   const { user } = useAuthStore();
   const canManage = user?.role === 'administrator' || user?.role === 'manager';
   const [updatingPaymentStatus, setUpdatingPaymentStatus] = useState(false);
+  const [updatingFundingSource, setUpdatingFundingSource] = useState(false);
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [inventoryOptions, setInventoryOptions] = useState<InventoryItemOption[]>([]);
@@ -58,7 +59,7 @@ export default function PurchasesPage() {
   const [receiving, setReceiving] = useState(false);
 
   const [form, setForm] = useState({
-    supplier_id: '', expected_date: '', notes: '', discount: '0',
+    supplier_id: '', expected_date: '', notes: '', discount: '0', funding_source: 'business',
     items: [{ inventory_item_id: '', item_name: '', unit: 'Kg', quantity_ordered: '', unit_price: '' }]
   });
   // "+ New Supplier" — form.supplier_id becomes '__custom__' and these two
@@ -143,6 +144,22 @@ export default function PurchasesPage() {
       toast.error(msg);
     } finally {
       setUpdatingPaymentStatus(false);
+    }
+  };
+
+  const updateFundingSource = async (source: 'business' | 'owner_personal') => {
+    if (!selected) return;
+    setUpdatingFundingSource(true);
+    try {
+      const { data } = await api.put(`/purchases/${selected.id}/funding-source`, { funding_source: source });
+      setSelected(prev => prev ? { ...prev, funding_source: source } : prev);
+      setOrders(prev => prev.map(o => o.id === selected.id ? { ...o, funding_source: source } : o));
+      toast.success(data.message || 'Funding source updated');
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not update funding source';
+      toast.error(msg);
+    } finally {
+      setUpdatingFundingSource(false);
     }
   };
 
@@ -250,6 +267,7 @@ export default function PurchasesPage() {
         expected_date: form.expected_date || undefined,
         notes: form.notes || undefined,
         discount: parseFloat(form.discount) || 0,
+        funding_source: form.funding_source,
         items: form.items.map(i => ({
           ...i,
           // '__custom__' is a frontend-only sentinel meaning "no inventory
@@ -263,7 +281,7 @@ export default function PurchasesPage() {
       toast.success(isNewSupplier ? `Purchase order created for new supplier "${newSupplierName.trim()}"` : 'Purchase order created');
       setShowNew(false);
       setNewSupplierName(''); setNewSupplierPhone('');
-      setForm({ supplier_id: '', expected_date: '', notes: '', discount: '0', items: [{ inventory_item_id: '', item_name: '', unit: 'Kg', quantity_ordered: '', unit_price: '' }] });
+      setForm({ supplier_id: '', expected_date: '', notes: '', discount: '0', funding_source: 'business', items: [{ inventory_item_id: '', item_name: '', unit: 'Kg', quantity_ordered: '', unit_price: '' }] });
       fetchOrders();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to create purchase order';
@@ -487,6 +505,22 @@ export default function PurchasesPage() {
                   <span className="font-medium">{selected.payment_status?.replace(/\b\w/g, l => l.toUpperCase()) || '—'}</span>
                 )}
               </div>
+              <div className="flex justify-between items-center">
+                <span className="text-text-muted">Funded By</span>
+                {canManage ? (
+                  <select
+                    value={selected.funding_source || 'business'}
+                    disabled={updatingFundingSource}
+                    onChange={e => updateFundingSource(e.target.value as 'business' | 'owner_personal')}
+                    className="select text-xs py-1 disabled:opacity-50"
+                  >
+                    <option value="business">Business Funds</option>
+                    <option value="owner_personal">Owner's Personal Money</option>
+                  </select>
+                ) : (
+                  <span className="font-medium">{selected.funding_source === 'owner_personal' ? "Owner's Personal Money" : 'Business Funds'}</span>
+                )}
+              </div>
             </div>
 
             {selected.items && selected.items.length > 0 && (
@@ -627,6 +661,26 @@ export default function PurchasesPage() {
             <div className="mt-3 pt-3 border-t border-border flex justify-between text-sm font-bold">
               <span>Estimated Total</span>
               <span className="text-brand">{formatCurrency(formTotal - (parseFloat(form.discount) || 0))}</span>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Who's Paying For This?</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setForm(p => ({ ...p, funding_source: 'business' }))}
+                className={`text-xs py-2 rounded-lg border transition-colors ${form.funding_source === 'business' ? 'border-brand bg-brand/10 text-brand font-medium' : 'border-border text-text-muted hover:text-text-primary'}`}
+              >
+                Business Funds
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm(p => ({ ...p, funding_source: 'owner_personal' }))}
+                className={`text-xs py-2 rounded-lg border transition-colors ${form.funding_source === 'owner_personal' ? 'border-brand bg-brand/10 text-brand font-medium' : 'border-border text-text-muted hover:text-text-primary'}`}
+              >
+                Owner's Personal Money
+              </button>
             </div>
           </div>
 
