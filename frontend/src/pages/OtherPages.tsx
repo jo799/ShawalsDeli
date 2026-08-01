@@ -152,16 +152,38 @@ export function ExpensesPage() {
     } finally { setUploadingReceiptFor(null); }
   };
 
-  const exportCsv = () => {
-    const rows = [['Title', 'Category', 'Vendor', 'Date', 'Payment Method', 'Amount', 'Reference']];
-    expenses.forEach(e => rows.push([e.title, e.category_name || '', e.vendor || '', e.expense_date.slice(0, 10), e.payment_method || '', String(e.amount), e.reference_no || '']));
-    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `expenses-${toLocalDateString()}.csv`;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
+  // Exports every matching expense, not just the current page — `expenses`
+  // only ever holds 10 rows at a time (see fetchExpenses above), and a
+  // total that silently only summed page 1 would be actively misleading
+  // rather than just incomplete.
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const exportCsv = async () => {
+    setExportingCsv(true);
+    try {
+      const { data } = await api.get('/expenses', {
+        params: { search: search || undefined, category_id: categoryFilter || undefined, payment_method: paymentFilter || undefined, limit: 10000 },
+      });
+      const all: Expense[] = data.data;
+      const rows = [['Title', 'Category', 'Vendor', 'Date', 'Payment Method', 'Amount', 'Reference', 'Funded By']];
+      all.forEach(e => rows.push([
+        e.title, e.category_name || '', e.vendor || '', e.expense_date.slice(0, 10), e.payment_method || '', String(e.amount), e.reference_no || '',
+        e.funding_source === 'owner_personal' ? "Owner's Personal Money" : 'Business Funds',
+      ]));
+      const total = all.reduce((sum, e) => sum + Number(e.amount), 0);
+      rows.push(['', '', '', '', '', '', '', '']);
+      rows.push(['TOTAL', '', '', '', '', String(total), '', '']);
+      const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `expenses-${toLocalDateString()}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Failed to export expenses');
+    } finally {
+      setExportingCsv(false);
+    }
   };
 
   const pieData = byCategory.map((c, i) => ({ name: c.name, value: c.total, fill: c.color || COLORS[i % COLORS.length] }));
@@ -172,7 +194,7 @@ export function ExpensesPage() {
       <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Expenses" subtitle="Track and manage business expenses">
           <FinancialSummaryExportButton />
-          <button onClick={exportCsv} disabled={expenses.length === 0} className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50"><Download size={13} /> Export</button>
+          <button onClick={exportCsv} disabled={expenses.length === 0 || exportingCsv} className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50"><Download size={13} /> {exportingCsv ? 'Exporting…' : 'Export'}</button>
           {canManage && <button onClick={openAdd} className="btn-primary flex items-center gap-2 text-sm"><Plus size={14} /> Add Expense</button>}
         </PageHeader>
 

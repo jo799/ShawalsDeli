@@ -163,19 +163,38 @@ export default function PurchasesPage() {
     }
   };
 
-  const exportPurchasesCsv = () => {
-    const rows: string[][] = [['PO Number', 'Supplier', 'Status', 'Order Date', 'Expected Date', 'Payment Status', 'Total Amount']];
-    orders.forEach(o => rows.push([
-      o.po_number, o.supplier_name || '', o.status, o.order_date?.slice(0, 10) || '',
-      o.expected_date?.slice(0, 10) || '', o.payment_status, String(o.total_amount),
-    ]));
-    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `purchase-orders-${toLocalDateString()}.csv`;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
+  // Exports every matching PO, not just the current page — `orders` only
+  // ever holds 10 rows at a time (see fetchOrders above).
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const exportPurchasesCsv = async () => {
+    setExportingCsv(true);
+    try {
+      const status = tabStatus[activeTab];
+      const { data } = await api.get('/purchases', {
+        params: { status: status === 'all' ? undefined : status, search: search || undefined, supplier_id: supplierFilter || undefined, limit: 10000 },
+      });
+      const all: PurchaseOrder[] = data.data;
+      const rows: string[][] = [['PO Number', 'Supplier', 'Status', 'Order Date', 'Expected Date', 'Payment Status', 'Total Amount', 'Funded By']];
+      all.forEach(o => rows.push([
+        o.po_number, o.supplier_name || '', o.status, o.order_date?.slice(0, 10) || '',
+        o.expected_date?.slice(0, 10) || '', o.payment_status, String(o.total_amount),
+        o.funding_source === 'owner_personal' ? "Owner's Personal Money" : 'Business Funds',
+      ]));
+      const total = all.reduce((sum, o) => sum + Number(o.total_amount), 0);
+      rows.push(['', '', '', '', '', '', '', '']);
+      rows.push(['TOTAL', '', '', '', '', '', String(total), '']);
+      const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `purchase-orders-${toLocalDateString()}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Failed to export purchase orders');
+    } finally {
+      setExportingCsv(false);
+    }
   };
 
   // Minimal hand-rolled CSV parser rather than pulling in a new dependency
@@ -330,7 +349,7 @@ export default function PurchasesPage() {
             <input type="file" accept=".csv,text/csv" className="hidden"
               onChange={e => { const f = e.target.files?.[0]; if (f) handleImportFile(f); e.target.value = ''; }} />
           </label>
-          <button onClick={exportPurchasesCsv} disabled={orders.length === 0} className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50"><Download size={13} /> Export</button>
+          <button onClick={exportPurchasesCsv} disabled={orders.length === 0 || exportingCsv} className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50"><Download size={13} /> {exportingCsv ? 'Exporting…' : 'Export'}</button>
           <button onClick={() => setShowNew(true)} className="btn-primary flex items-center gap-2 text-sm"><Plus size={14} /> New Purchase</button>
         </PageHeader>
 
