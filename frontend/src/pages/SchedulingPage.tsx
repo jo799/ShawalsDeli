@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Printer, Plus, Copy, X, Clock, LogIn, LogOut, Stethoscope, Upload, Bell, BellOff, CalendarOff, Check } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Printer, Plus, Copy, X, Clock, LogIn, LogOut, Stethoscope, Upload, Bell, BellOff, CalendarOff, Check, Users, CalendarDays } from 'lucide-react';
 import { addDays, startOfWeek, format, isSameDay, addWeeks, subWeeks, subDays, addMonths, subMonths } from 'date-fns';
 import api from '@/lib/api';
 import { getInitials } from '@/lib/utils';
@@ -17,6 +17,14 @@ interface Schedule {
 }
 interface Attendance {
   id: string; check_in_time?: string | null; check_out_time?: string | null;
+}
+// One row per active staff member for the admin attendance view - unlike
+// the raw /staff/attendance response (which only ever has a row for
+// someone who's actually checked in at least once), this always includes
+// everyone currently active, so "hasn't checked in at all today" is just
+// as visible as an actual check-in time.
+interface AttendanceRow {
+  user_id: string; full_name: string; role: string; check_in_time: string | null; check_out_time: string | null;
 }
 interface SickOffRequest {
   id: string; user_id: string; requested_date: string; message: string; receipt_url?: string;
@@ -79,6 +87,13 @@ export default function SchedulingPage() {
   const [myAttendance, setMyAttendance] = useState<Attendance | null>(null);
   const [clockBusy, setClockBusy] = useState(false);
 
+  // Staff Attendance — admin/manager view of everyone's check-in/out for a
+  // given day, not just their own.
+  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  const [attendanceViewDate, setAttendanceViewDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
+  const [attendanceRows, setAttendanceRows] = useState<AttendanceRow[]>([]);
+  const [loadingAttendance, setLoadingAttendance] = useState(false);
+
   // Recurring day off — admin/manager only.
   const [editingRecurringOffFor, setEditingRecurringOffFor] = useState<string | null>(null);
   const [savingRecurringOff, setSavingRecurringOff] = useState(false);
@@ -126,6 +141,66 @@ export default function SchedulingPage() {
     } catch { /* non-critical */ }
   }, []);
   useEffect(() => { fetchMyAttendance(); }, [fetchMyAttendance]);
+
+  // Today's schedule entries specifically — fetched independently of
+  // whichever week the grid below happens to be showing (someone could
+  // have navigated to a different week entirely), and with no date params
+  // at all so the backend's own CURRENT_DATE (Nairobi-pinned) decides what
+  // "today" means, rather than trusting this browser's clock/timezone.
+  const [todaySchedules, setTodaySchedules] = useState<Schedule[]>([]);
+  const fetchTodaySchedules = useCallback(async () => {
+    try {
+      const { data } = await api.get('/staff/schedules');
+      setTodaySchedules(data.data);
+    } catch { /* non-critical — worst case, the off-day check just falls back to recurring_day_off alone */ }
+  }, []);
+  useEffect(() => { fetchTodaySchedules(); }, [fetchTodaySchedules]);
+
+  // Whether the currently logged-in person is off today - an explicit
+  // schedule entry (an approved sick-off day, or someone specifically
+  // marked off) always takes precedence over the recurring pattern,
+  // exactly matching getShiftForDay's own precedence rules for the grid.
+  const myRecurringDayOff = staff.find(s => s.id === user?.id)?.recurring_day_off;
+  const myExplicitTodayEntry = todaySchedules.find(s => s.user_id === user?.id);
+  const isOffToday = myExplicitTodayEntry
+    ? myExplicitTodayEntry.shift_type === 'off'
+    : myRecurringDayOff !== null && myRecurringDayOff !== undefined && new Date().getDay() === myRecurringDayOff;
+
+  // Merges the full active staff list with whatever attendance records
+  // exist for the selected date - staff/attendance alone only ever
+  // returns a row for someone who's actually checked in at least once, so
+  // on its own it can't show "hasn't checked in today at all", which is
+  // exactly the thing an admin most needs to notice at a glance.
+  const fetchAttendanceForAdmin = useCallback(async (date: string) => {
+    setLoadingAttendance(true);
+    try {
+      const [staffRes, attendanceRes] = await Promise.all([
+        api.get('/staff', { params: { status: 'active', limit: 200 } }),
+        api.get('/staff/attendance', { params: { start_date: date, end_date: date } }),
+      ]);
+      const byUserId = new Map<string, Attendance>(
+        attendanceRes.data.data.map((a: Attendance & { user_id: string }) => [a.user_id, a])
+      );
+      const rows: AttendanceRow[] = staffRes.data.data.map((s: { id: string; full_name: string; role: string }) => {
+        const record = byUserId.get(s.id);
+        return { user_id: s.id, full_name: s.full_name, role: s.role, check_in_time: record?.check_in_time ?? null, check_out_time: record?.check_out_time ?? null };
+      });
+      // Checked-in-and-working first, then checked-out, then never
+      // checked in - the group an admin most likely wants to scan first
+      // (who's actually here right now) leads.
+      rows.sort((a, b) => {
+        const rank = (r: AttendanceRow) => r.check_in_time && !r.check_out_time ? 0 : r.check_in_time ? 1 : 2;
+        return rank(a) - rank(b) || a.full_name.localeCompare(b.full_name);
+      });
+      setAttendanceRows(rows);
+    } catch {
+      toast.error('Failed to load attendance');
+    } finally {
+      setLoadingAttendance(false);
+    }
+  }, []);
+
+  useEffect(() => { if (showAttendanceModal) fetchAttendanceForAdmin(attendanceViewDate); }, [showAttendanceModal, attendanceViewDate, fetchAttendanceForAdmin]);
 
   const handleCheckIn = async () => {
     setClockBusy(true);
@@ -443,6 +518,11 @@ export default function SchedulingPage() {
           <button onClick={exportCsv} className="btn-secondary flex items-center gap-1.5 text-sm">Export CSV</button>
           <button onClick={() => window.print()} className="btn-secondary flex items-center gap-1.5 text-sm"><Printer size={13} /> Print</button>
           {canManage && (
+            <button onClick={() => setShowAttendanceModal(true)} className="btn-secondary flex items-center gap-1.5 text-sm">
+              <Users size={14} /> <span className="hidden sm:inline">Staff Attendance</span>
+            </button>
+          )}
+          {canManage && (
             <button onClick={() => { setAddForm({ user_id: '', shift_date: format(weekStart, 'yyyy-MM-dd'), shift_type: 'day' }); setShowAddShift(true); }} className="btn-primary flex items-center gap-2 text-sm">
               <Plus size={14} /> Create Schedule
             </button>
@@ -462,26 +542,37 @@ export default function SchedulingPage() {
               </span>
             ) : myAttendance?.check_in_time ? (
               <span className="text-text-secondary">Checked in at <span className="font-semibold text-status-success">{format(new Date(myAttendance.check_in_time), 'h:mm a')}</span> — not checked out yet</span>
+            ) : isOffToday ? (
+              <span className="text-text-muted flex items-center gap-1.5">
+                <CalendarOff size={13} /> You're off today — no need to check in
+              </span>
             ) : (
               <span className="text-text-muted">You haven't checked in today</span>
             )}
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={handleCheckIn}
-              disabled={clockBusy || !!myAttendance?.check_in_time}
-              className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 disabled:opacity-40"
-            >
-              <LogIn size={13} /> Check In
+          {(!isOffToday || myAttendance?.check_in_time) && (
+            <div className="flex gap-2">
+              <button
+                onClick={handleCheckIn}
+                disabled={clockBusy || !!myAttendance?.check_in_time}
+                className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 disabled:opacity-40"
+              >
+                <LogIn size={13} /> Check In
+              </button>
+              <button
+                onClick={handleCheckOut}
+                disabled={clockBusy || !myAttendance?.check_in_time || !!myAttendance?.check_out_time}
+                className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 disabled:opacity-40"
+              >
+                <LogOut size={13} /> Check Out
+              </button>
+            </div>
+          )}
+          {isOffToday && !myAttendance?.check_in_time && (
+            <button onClick={handleCheckIn} disabled={clockBusy} className="text-xs text-text-muted hover:text-text-primary underline disabled:opacity-40">
+              Coming in anyway? Check in
             </button>
-            <button
-              onClick={handleCheckOut}
-              disabled={clockBusy || !myAttendance?.check_in_time || !!myAttendance?.check_out_time}
-              className="btn-secondary flex items-center gap-1.5 text-xs py-1.5 disabled:opacity-40"
-            >
-              <LogOut size={13} /> Check Out
-            </button>
-          </div>
+          )}
         </div>
 
         {/* Stats — every number here is real */}
@@ -849,6 +940,72 @@ export default function SchedulingPage() {
                   )}
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Staff Attendance — admin/manager view of everyone's check-in/out,
+          not just their own. Merged with the full staff list (see
+          fetchAttendanceForAdmin) so "hasn't checked in today" is just as
+          visible as an actual time. */}
+      {showAttendanceModal && (
+        <div className="modal-backdrop" onClick={() => setShowAttendanceModal(false)}>
+          <div className="modal max-w-lg" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-border flex items-center justify-between">
+              <h2 className="section-title flex items-center gap-2"><Users size={16} /> Staff Attendance</h2>
+              <button onClick={() => setShowAttendanceModal(false)} className="btn-ghost p-1"><X size={16} /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="flex items-center gap-2">
+                <CalendarDays size={15} className="text-text-muted" />
+                <input
+                  type="date" className="input text-sm" value={attendanceViewDate}
+                  max={format(new Date(), 'yyyy-MM-dd')}
+                  onChange={e => setAttendanceViewDate(e.target.value)}
+                />
+                <button onClick={() => setAttendanceViewDate(format(new Date(), 'yyyy-MM-dd'))} className="btn-secondary text-xs py-1.5 px-2.5">Today</button>
+              </div>
+
+              {loadingAttendance ? (
+                <p className="text-sm text-text-muted text-center py-8">Loading…</p>
+              ) : attendanceRows.length === 0 ? (
+                <p className="text-sm text-text-muted text-center py-8">No active staff found.</p>
+              ) : (
+                <div className="space-y-2 max-h-[55vh] overflow-y-auto">
+                  {attendanceRows.map(row => {
+                    const stillWorking = row.check_in_time && !row.check_out_time;
+                    const done = row.check_in_time && row.check_out_time;
+                    return (
+                      <div key={row.user_id} className="flex items-center justify-between border border-border rounded-xl px-3 py-2.5">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{row.full_name}</p>
+                          <p className="text-[10px] text-text-muted capitalize">{ROLE_LABEL[row.role] || row.role}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          {!row.check_in_time ? (
+                            <span className="text-xs font-medium px-2 py-1 rounded-full bg-status-error/10 text-status-error">Not checked in</span>
+                          ) : (
+                            <div className="space-y-0.5">
+                              <p className="text-xs">
+                                <LogIn size={11} className="inline mr-1 text-status-success" />
+                                {format(new Date(row.check_in_time), 'h:mm a')}
+                                {stillWorking && <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-status-success/10 text-status-success">Working</span>}
+                              </p>
+                              {done && (
+                                <p className="text-xs text-text-muted">
+                                  <LogOut size={11} className="inline mr-1" />
+                                  {format(new Date(row.check_out_time as string), 'h:mm a')}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </div>
