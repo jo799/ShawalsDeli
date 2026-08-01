@@ -73,6 +73,7 @@ export default function StaffPage() {
   const [showRolesModal, setShowRolesModal] = useState(false);
   const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
   const [showAddRole, setShowAddRole] = useState(false);
+  const [quickAddFromStaffForm, setQuickAddFromStaffForm] = useState(false);
   const [newRoleLabel, setNewRoleLabel] = useState('');
   const [newRolePermissions, setNewRolePermissions] = useState<Permission[]>([]);
   const [savingRole, setSavingRole] = useState(false);
@@ -187,6 +188,11 @@ export default function StaffPage() {
   const getRoleLabel = (role: string): string =>
     ROLE_LABELS[role as Role] || customRoles.find(r => r.name === role)?.label || role;
 
+  const closeStaffModal = () => {
+    setShowAdd(false);
+    setShowAddRole(false); setQuickAddFromStaffForm(false); setNewRoleLabel(''); setNewRolePermissions([]);
+  };
+
   const togglePermission = (perm: Permission) => {
     setNewRolePermissions(prev => prev.includes(perm) ? prev.filter(p => p !== perm) : [...prev, perm]);
   };
@@ -196,8 +202,9 @@ export default function StaffPage() {
     if (newRolePermissions.length === 0) { toast.error('Pick at least one permission for this role'); return; }
     setSavingRole(true);
     try {
-      await api.post('/roles/custom', { label: newRoleLabel.trim(), permissions: newRolePermissions });
+      const { data } = await api.post('/roles/custom', { label: newRoleLabel.trim(), permissions: newRolePermissions });
       toast.success(`"${newRoleLabel.trim()}" role created`);
+      if (quickAddFromStaffForm) { setForm(p => ({ ...p, role: data.data.name })); setQuickAddFromStaffForm(false); }
       setNewRoleLabel(''); setNewRolePermissions([]); setShowAddRole(false);
       fetchCustomRoles();
     } catch (e: unknown) {
@@ -473,7 +480,7 @@ export default function StaffPage() {
       </div>
 
       {/* Add / Edit Staff Modal */}
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title={editingId ? 'Edit Staff Member' : 'Add Staff Member'} size="md">
+      <Modal open={showAdd} onClose={closeStaffModal} title={editingId ? 'Edit Staff Member' : 'Add Staff Member'} size="md">
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="col-span-2">
@@ -491,7 +498,11 @@ export default function StaffPage() {
             <div>
               <label className="block text-xs text-text-muted mb-1">Role *</label>
               <select
-                className="select" value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}
+                className="select" value={form.role}
+                onChange={e => {
+                  if (e.target.value === '__add_new__') { setShowAddRole(true); setQuickAddFromStaffForm(true); return; }
+                  setForm(p => ({ ...p, role: e.target.value }));
+                }}
                 disabled={editingId === currentUser?.id && currentUser?.role === 'administrator'}
                 title={editingId === currentUser?.id ? "You can't change your own role" : undefined}
               >
@@ -501,8 +512,53 @@ export default function StaffPage() {
                     {customRoles.map(r => <option key={r.id} value={r.name}>{r.label}</option>)}
                   </optgroup>
                 )}
+                <option value="__add_new__">+ Add New Role…</option>
               </select>
             </div>
+
+            {/* Inline quick-add — lets an admin create a brand new role
+                without leaving this form. The role the admin actually
+                came here to assign to this staff member is picked up
+                automatically once created (see createRole). */}
+            {showAddRole && quickAddFromStaffForm && (
+              <div className="col-span-2 border border-brand/30 bg-brand/5 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-text-primary">New Role</p>
+                  <button
+                    type="button"
+                    onClick={() => { setShowAddRole(false); setQuickAddFromStaffForm(false); setNewRoleLabel(''); setNewRolePermissions([]); }}
+                    className="btn-ghost p-1"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                <div>
+                  <label className="block text-xs text-text-muted mb-1">Role name</label>
+                  <input
+                    type="text" className="input" placeholder="e.g. Driver"
+                    value={newRoleLabel} onChange={e => setNewRoleLabel(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-text-muted mb-1.5">What can this role access?</label>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                    {MATRIX_MODULES.map(m => (
+                      <label key={m.key} className="flex items-center gap-2 text-xs cursor-pointer">
+                        <input
+                          type="checkbox" checked={newRolePermissions.includes(m.key)}
+                          onChange={() => togglePermission(m.key)}
+                          className="rounded border-border"
+                        />
+                        {m.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <button type="button" onClick={createRole} disabled={savingRole} className="btn-primary w-full text-xs py-2 disabled:opacity-50">
+                  {savingRole ? 'Creating…' : 'Create & Use This Role'}
+                </button>
+              </div>
+            )}
             <div>
               <label className="block text-xs text-text-muted mb-1">Schedule Type</label>
               <select className="select" value={form.schedule_type} onChange={e => setForm(p => ({ ...p, schedule_type: e.target.value }))}>
@@ -526,7 +582,7 @@ export default function StaffPage() {
             )}
           </div>
           <div className="flex gap-3 pt-2">
-            <button onClick={() => setShowAdd(false)} className="btn-secondary flex-1">Cancel</button>
+            <button onClick={closeStaffModal} className="btn-secondary flex-1">Cancel</button>
             <button onClick={saveStaff} disabled={saving} className="btn-primary flex-1 disabled:opacity-50">
               {saving ? 'Saving…' : editingId ? 'Save Changes' : 'Add Staff Member'}
             </button>
