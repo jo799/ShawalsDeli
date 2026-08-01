@@ -26,8 +26,24 @@ export const formatDateTime = (date: string | Date): string =>
 // still reports "today" as the previous UTC day. Every place in this app
 // that used toISOString().split('T')[0] to mean "today" had this bug; this
 // helper is the fix, built from local getters instead of UTC ones.
+import { startOfWeek, startOfMonth } from 'date-fns';
+
 export const toLocalDateString = (d: Date = new Date()): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+// [start, end] date strings for "today"/"this week"/"this month", ending
+// today in every case. Matches the backend's own DATE_TRUNC('day'/'week'/
+// 'month', CURRENT_TIMESTAMP) exactly - Monday-start week, calendar month
+// start - so a period picked here and the same period picked server-side
+// (e.g. the Financial Summary export) never disagree about what "this
+// week" actually covers.
+export const getPeriodDateRange = (period: 'day' | 'week' | 'month'): [string, string] => {
+  const now = new Date();
+  const end = toLocalDateString(now);
+  if (period === 'day') return [end, end];
+  if (period === 'week') return [toLocalDateString(startOfWeek(now, { weekStartsOn: 1 })), end];
+  return [toLocalDateString(startOfMonth(now)), end];
+};
 
 export const getInitials = (name: string): string =>
   name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();

@@ -1,9 +1,9 @@
 // ─── Expenses Page ────────────────────────────────────────────────────────────
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Download, X, Edit2, Trash2, Upload, FileText, CreditCard, TrendingUp, Calendar, AlertTriangle } from 'lucide-react';
+import { Plus, Download, X, Edit2, Trash2, Upload, FileText, CreditCard, TrendingUp, Calendar, AlertTriangle, ChevronDown } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
-import { formatCurrency, formatDate, toLocalDateString } from '@/lib/utils';
+import { formatCurrency, formatDate, toLocalDateString, getPeriodDateRange } from '@/lib/utils';
 import { PageHeader, Pagination, SearchInput, LoadingPage, Modal, FinancialSummaryExportButton } from '@/components/ui';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAuthStore } from '@/store/authStore';
@@ -157,14 +157,22 @@ export function ExpensesPage() {
   // total that silently only summed page 1 would be actively misleading
   // rather than just incomplete.
   const [exportingCsv, setExportingCsv] = useState(false);
-  const exportCsv = async () => {
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportCsv = async (period: 'day' | 'week' | 'month' | 'all') => {
+    setShowExportMenu(false);
     setExportingCsv(true);
     try {
+      const [start_date, end_date] = period === 'all' ? [undefined, undefined] : getPeriodDateRange(period);
       const { data } = await api.get('/expenses', {
-        params: { search: search || undefined, category_id: categoryFilter || undefined, payment_method: paymentFilter || undefined, limit: 10000 },
+        params: { search: search || undefined, category_id: categoryFilter || undefined, payment_method: paymentFilter || undefined, start_date, end_date, limit: 10000 },
       });
       const all: Expense[] = data.data;
-      const rows = [['Title', 'Category', 'Vendor', 'Date', 'Payment Method', 'Amount', 'Reference', 'Funded By']];
+      const periodLabel = { day: 'Daily (Today)', week: 'Weekly (This Week)', month: 'Monthly (This Month)', all: 'All Time' }[period];
+      const rows = [
+        [`Period: ${periodLabel}${start_date ? ` (${start_date} to ${end_date})` : ''}`],
+        [],
+        ['Title', 'Category', 'Vendor', 'Date', 'Payment Method', 'Amount', 'Reference', 'Funded By'],
+      ];
       all.forEach(e => rows.push([
         e.title, e.category_name || '', e.vendor || '', e.expense_date.slice(0, 10), e.payment_method || '', String(e.amount), e.reference_no || '',
         e.funding_source === 'owner_personal' ? "Owner's Personal Money" : 'Business Funds',
@@ -176,7 +184,7 @@ export function ExpensesPage() {
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `expenses-${toLocalDateString()}.csv`;
+      a.href = url; a.download = `expenses-${period}-${toLocalDateString()}.csv`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     } catch {
@@ -194,7 +202,27 @@ export function ExpensesPage() {
       <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden p-6">
         <PageHeader title="Expenses" subtitle="Track and manage business expenses">
           <FinancialSummaryExportButton />
-          <button onClick={exportCsv} disabled={expenses.length === 0 || exportingCsv} className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50"><Download size={13} /> {exportingCsv ? 'Exporting…' : 'Export'}</button>
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu(v => !v)}
+              disabled={expenses.length === 0 || exportingCsv}
+              className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50"
+            >
+              <Download size={13} /> {exportingCsv ? 'Exporting…' : 'Export'} <ChevronDown size={13} />
+            </button>
+            {showExportMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowExportMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 w-40 bg-surface-card border border-border rounded-xl shadow-modal z-20 overflow-hidden">
+                  {([['day', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly'], ['all', 'All Time']] as const).map(([value, label]) => (
+                    <button key={value} onClick={() => exportCsv(value)} className="w-full text-left px-4 py-2.5 text-sm hover:bg-surface-50 transition-colors">
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           {canManage && <button onClick={openAdd} className="btn-primary flex items-center gap-2 text-sm"><Plus size={14} /> Add Expense</button>}
         </PageHeader>
 

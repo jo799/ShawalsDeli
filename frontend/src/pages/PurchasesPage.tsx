@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Download, Eye, Search, X, Printer, Phone, PackageCheck, ShoppingCart, Wallet, Truck, AlertTriangle, Calendar } from 'lucide-react';
+import { Plus, Download, Eye, Search, X, Printer, Phone, PackageCheck, ShoppingCart, Wallet, Truck, AlertTriangle, Calendar, ChevronDown } from 'lucide-react';
 import api from '@/lib/api';
-import { formatCurrency, formatDate, toLocalDateString } from '@/lib/utils';
+import { formatCurrency, formatDate, toLocalDateString, getPeriodDateRange } from '@/lib/utils';
 import { PageHeader, StatusBadge, Pagination, Modal, LoadingPage, FinancialSummaryExportButton } from '@/components/ui';
 import PurchaseOrderPrint, { PurchaseOrderContent } from '@/components/PurchaseOrderDocument';
 import { useAuthStore } from '@/store/authStore';
@@ -166,15 +166,23 @@ export default function PurchasesPage() {
   // Exports every matching PO, not just the current page — `orders` only
   // ever holds 10 rows at a time (see fetchOrders above).
   const [exportingCsv, setExportingCsv] = useState(false);
-  const exportPurchasesCsv = async () => {
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportPurchasesCsv = async (period: 'day' | 'week' | 'month' | 'all') => {
+    setShowExportMenu(false);
     setExportingCsv(true);
     try {
       const status = tabStatus[activeTab];
+      const [start_date, end_date] = period === 'all' ? [undefined, undefined] : getPeriodDateRange(period);
       const { data } = await api.get('/purchases', {
-        params: { status: status === 'all' ? undefined : status, search: search || undefined, supplier_id: supplierFilter || undefined, limit: 10000 },
+        params: { status: status === 'all' ? undefined : status, search: search || undefined, supplier_id: supplierFilter || undefined, start_date, end_date, limit: 10000 },
       });
       const all: PurchaseOrder[] = data.data;
-      const rows: string[][] = [['PO Number', 'Supplier', 'Status', 'Order Date', 'Expected Date', 'Payment Status', 'Total Amount', 'Funded By']];
+      const periodLabel = { day: 'Daily (Today)', week: 'Weekly (This Week)', month: 'Monthly (This Month)', all: 'All Time' }[period];
+      const rows: string[][] = [
+        [`Period: ${periodLabel}${start_date ? ` (${start_date} to ${end_date})` : ''}`],
+        [],
+        ['PO Number', 'Supplier', 'Status', 'Order Date', 'Expected Date', 'Payment Status', 'Total Amount', 'Funded By'],
+      ];
       all.forEach(o => rows.push([
         o.po_number, o.supplier_name || '', o.status, o.order_date?.slice(0, 10) || '',
         o.expected_date?.slice(0, 10) || '', o.payment_status, String(o.total_amount),
@@ -187,7 +195,7 @@ export default function PurchasesPage() {
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `purchase-orders-${toLocalDateString()}.csv`;
+      a.href = url; a.download = `purchase-orders-${period}-${toLocalDateString()}.csv`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     } catch {
@@ -349,7 +357,27 @@ export default function PurchasesPage() {
             <input type="file" accept=".csv,text/csv" className="hidden"
               onChange={e => { const f = e.target.files?.[0]; if (f) handleImportFile(f); e.target.value = ''; }} />
           </label>
-          <button onClick={exportPurchasesCsv} disabled={orders.length === 0 || exportingCsv} className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50"><Download size={13} /> {exportingCsv ? 'Exporting…' : 'Export'}</button>
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu(v => !v)}
+              disabled={orders.length === 0 || exportingCsv}
+              className="btn-secondary flex items-center gap-1.5 text-sm disabled:opacity-50"
+            >
+              <Download size={13} /> {exportingCsv ? 'Exporting…' : 'Export'} <ChevronDown size={13} />
+            </button>
+            {showExportMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowExportMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 w-40 bg-surface-card border border-border rounded-xl shadow-modal z-20 overflow-hidden">
+                  {([['day', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly'], ['all', 'All Time']] as const).map(([value, label]) => (
+                    <button key={value} onClick={() => exportPurchasesCsv(value)} className="w-full text-left px-4 py-2.5 text-sm hover:bg-surface-50 transition-colors">
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <button onClick={() => setShowNew(true)} className="btn-primary flex items-center gap-2 text-sm"><Plus size={14} /> New Purchase</button>
         </PageHeader>
 
