@@ -7,7 +7,7 @@ import { confirmDelete } from '@/lib/confirmPreference';
 // the project root where shared/permissions.ts lives, so this resolves
 // correctly in every tool with zero path-alias configuration required.
 // See authStore.ts for the same reasoning.
-import { ROLES, ROLE_PERMISSIONS, ROLE_LABELS, MATRIX_MODULES, type Role } from '../../../shared/permissions';
+import { ROLES, ROLE_PERMISSIONS, ROLE_LABELS, MATRIX_MODULES, type Role, type Permission } from '../../../shared/permissions';
 import { formatDate, getInitials, toLocalDateString } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
 import { PageHeader, StatusBadge, Pagination, Modal, LoadingPage } from '@/components/ui';
@@ -20,6 +20,9 @@ interface StaffMember {
 }
 interface PendingUser {
   id: string; full_name: string; email: string; phone?: string; created_at: string;
+}
+interface CustomRole {
+  id: string; name: string; label: string; permissions: Permission[]; staff_count: number;
 }
 
 const ROLE_BADGE: Record<string, string> = {
@@ -35,7 +38,9 @@ const ROLE_BADGE: Record<string, string> = {
 // Role → access table for the "Manage Roles" panel comes directly from the
 // same canonical module (@shared/permissions) the Sidebar filters
 // navigation with, and that backend route guards are meant to agree with —
-// or hid, so the two could silently drift apart.
+// or hid, so the two could silently drift apart. The 7 built-in roles
+// shown from it are still fixed in code, same as always — custom roles
+// (fetched separately below) are the genuinely editable part.
 
 function randomPassword(): string {
   // Real random default instead of a fixed, guessable string that would
@@ -66,6 +71,12 @@ export default function StaffPage() {
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [showRolesModal, setShowRolesModal] = useState(false);
+  const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
+  const [showAddRole, setShowAddRole] = useState(false);
+  const [newRoleLabel, setNewRoleLabel] = useState('');
+  const [newRolePermissions, setNewRolePermissions] = useState<Permission[]>([]);
+  const [savingRole, setSavingRole] = useState(false);
+  const [deletingRoleId, setDeletingRoleId] = useState<string | null>(null);
   const [resetPwMember, setResetPwMember] = useState<StaffMember | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [resettingPw, setResettingPw] = useState(false);
@@ -77,6 +88,13 @@ export default function StaffPage() {
       const { data } = await api.get('/staff', { params: { approval_status: 'pending', limit: 50 } });
       setPendingUsers(data.data);
     } catch { /* non-critical for the main staff list */ }
+  }, []);
+
+  const fetchCustomRoles = useCallback(async () => {
+    try {
+      const { data } = await api.get('/roles/custom');
+      setCustomRoles(data.data);
+    } catch { /* non-critical — role dropdown/matrix just shows built-ins only */ }
   }, []);
 
   const fetchStaff = useCallback(async () => {
@@ -96,7 +114,7 @@ export default function StaffPage() {
   }, [search, roleFilter, statusFilter, page]);
 
   useEffect(() => { fetchStaff(); }, [fetchStaff]);
-  useEffect(() => { fetchPending(); }, [fetchPending]);
+  useEffect(() => { fetchPending(); fetchCustomRoles(); }, [fetchPending, fetchCustomRoles]);
   useEffect(() => { const t = setTimeout(fetchStaff, 400); return () => clearTimeout(t); }, [search]);
 
   useEffect(() => {
@@ -162,6 +180,45 @@ export default function StaffPage() {
     } finally { setResettingPw(false); }
   };
 
+  // Resolves a role's display label across both built-in roles (fixed,
+  // compiled-in labels) and custom ones (fetched from the database) — used
+  // everywhere a role name would otherwise show as a raw slug like
+  // "delivery_rider" instead of "Delivery Rider".
+  const getRoleLabel = (role: string): string =>
+    ROLE_LABELS[role as Role] || customRoles.find(r => r.name === role)?.label || role;
+
+  const togglePermission = (perm: Permission) => {
+    setNewRolePermissions(prev => prev.includes(perm) ? prev.filter(p => p !== perm) : [...prev, perm]);
+  };
+
+  const createRole = async () => {
+    if (!newRoleLabel.trim()) { toast.error('Give the role a name'); return; }
+    if (newRolePermissions.length === 0) { toast.error('Pick at least one permission for this role'); return; }
+    setSavingRole(true);
+    try {
+      await api.post('/roles/custom', { label: newRoleLabel.trim(), permissions: newRolePermissions });
+      toast.success(`"${newRoleLabel.trim()}" role created`);
+      setNewRoleLabel(''); setNewRolePermissions([]); setShowAddRole(false);
+      fetchCustomRoles();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to create role';
+      toast.error(msg);
+    } finally { setSavingRole(false); }
+  };
+
+  const deleteRole = async (role: CustomRole) => {
+    if (!confirmDelete(`Delete the "${role.label}" role? This can't be undone.`)) return;
+    setDeletingRoleId(role.id);
+    try {
+      await api.delete(`/roles/custom/${role.id}`);
+      toast.success(`"${role.label}" role deleted`);
+      fetchCustomRoles();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to delete role';
+      toast.error(msg);
+    } finally { setDeletingRoleId(null); }
+  };
+
   // Approving assigns the default 'waiter' role for now — an admin can
   // change it afterward from the main staff table like any other edit.
   // Rejecting just leaves the account permanently unable to log in; it
@@ -223,6 +280,7 @@ export default function StaffPage() {
           <select className="select text-xs py-1.5 w-36" value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
             <option value="">All Roles</option>
             {ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+            {customRoles.map(r => <option key={r.id} value={r.name}>{r.label}</option>)}
           </select>
           <select className="select text-xs py-1.5 w-32" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
             <option value="">All Status</option>
@@ -264,7 +322,7 @@ export default function StaffPage() {
                       </td>
                       <td className="table-cell">
                         <span className={`badge text-xs ${ROLE_BADGE[member.role] || 'badge-muted'}`}>
-                          {ROLE_LABELS[member.role as Role] || member.role}
+                          {getRoleLabel(member.role)}
                         </span>
                       </td>
                       <td className="table-cell text-text-secondary text-xs">{member.phone || '—'}</td>
@@ -335,12 +393,16 @@ export default function StaffPage() {
         <div>
           <h2 className="section-title text-sm mb-3">Role Distribution</h2>
           <div className="space-y-2">
-            {ROLES.map(role => {
-              const count = roleDistrib.find(r => r.role === role)?.count || 0;
+            {[
+              ...ROLES.map(role => ({ key: role, label: ROLE_LABELS[role], count: roleDistrib.find(r => r.role === role)?.count || 0 })),
+              ...customRoles
+                .map(cr => ({ key: cr.name, label: cr.label, count: roleDistrib.find(r => r.role === cr.name)?.count || 0 }))
+                .filter(r => r.count > 0),
+            ].map(({ key, label, count }) => {
               const pct = totalForDistrib ? Math.round(count / totalForDistrib * 100) : 0;
               return (
-                <div key={role} className="flex items-center gap-2 text-xs">
-                  <span className="text-text-secondary w-24 truncate">{ROLE_LABELS[role]}</span>
+                <div key={key} className="flex items-center gap-2 text-xs">
+                  <span className="text-text-secondary w-24 truncate">{label}</span>
                   <div className="flex-1 h-1.5 bg-surface-50 rounded-full overflow-hidden">
                     <div className="h-full bg-brand rounded-full" style={{ width: `${pct}%` }} />
                   </div>
@@ -434,6 +496,11 @@ export default function StaffPage() {
                 title={editingId === currentUser?.id ? "You can't change your own role" : undefined}
               >
                 {ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+                {customRoles.length > 0 && (
+                  <optgroup label="Custom Roles">
+                    {customRoles.map(r => <option key={r.id} value={r.name}>{r.label}</option>)}
+                  </optgroup>
+                )}
               </select>
             </div>
             <div>
@@ -487,36 +554,129 @@ export default function StaffPage() {
         </div>
       </Modal>
 
-      {/* Manage Roles — informational, not a configurable permissions
-          matrix. Roles are fixed in code (each route's authorize() call),
-          not database-driven, so an editable UI here would be fake. This
-          shows what's actually true today. */}
-      <Modal open={showRolesModal} onClose={() => setShowRolesModal(false)} title="Roles & Access" size="lg">
-        <div className="space-y-3">
-          <p className="text-xs text-text-muted">
-            Roles are fixed in how the system is built today, not editable from this screen — this table shows what each role can actually access right now.
-          </p>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-surface-50">
-                <tr>
-                  <th className="table-header px-3 py-2 text-left">Role</th>
-                  {MATRIX_MODULES.map(m => <th key={m.key} className="table-header px-3 py-2 text-left">{m.label}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {ROLES.map(role => (
-                  <tr key={role} className="table-row">
-                    <td className="table-cell font-medium text-xs">{ROLE_LABELS[role] || role}</td>
-                    {MATRIX_MODULES.map(m => (
-                      <td key={m.key} className="table-cell text-xs">
-                        <span className={ROLE_PERMISSIONS[role].includes(m.key) ? 'text-status-success' : 'text-text-muted'}>{ROLE_PERMISSIONS[role].includes(m.key) ? '✓' : '—'}</span>
-                      </td>
-                    ))}
+      {/* Manage Roles. The built-in 7 are still fixed in code (each route's
+          authorize() call) - shown here as a reference table, not
+          editable. Custom roles below are the genuinely configurable
+          part: real database rows with their own picked permissions. */}
+      <Modal open={showRolesModal} onClose={() => { setShowRolesModal(false); setShowAddRole(false); }} title="Roles & Access" size="lg">
+        <div className="space-y-5">
+          <div>
+            <p className="text-xs text-text-muted mb-2">
+              These 7 built-in roles are fixed in how the system is built — this table shows what each one can actually access.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-surface-50">
+                  <tr>
+                    <th className="table-header px-3 py-2 text-left">Role</th>
+                    {MATRIX_MODULES.map(m => <th key={m.key} className="table-header px-3 py-2 text-left">{m.label}</th>)}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {ROLES.map(role => (
+                    <tr key={role} className="table-row">
+                      <td className="table-cell font-medium text-xs">{ROLE_LABELS[role] || role}</td>
+                      {MATRIX_MODULES.map(m => (
+                        <td key={m.key} className="table-cell text-xs">
+                          <span className={ROLE_PERMISSIONS[role].includes(m.key) ? 'text-status-success' : 'text-text-muted'}>{ROLE_PERMISSIONS[role].includes(m.key) ? '✓' : '—'}</span>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="section-title text-sm">Custom Roles</h3>
+              {!showAddRole && (
+                <button onClick={() => setShowAddRole(true)} className="btn-secondary text-xs py-1.5 flex items-center gap-1.5">
+                  <Plus size={13} /> Add Role
+                </button>
+              )}
+            </div>
+
+            {customRoles.length === 0 && !showAddRole && (
+              <p className="text-xs text-text-muted italic">No custom roles yet — add one for a job that doesn't fit the built-in list, like a delivery rider or an accountant.</p>
+            )}
+
+            {customRoles.length > 0 && (
+              <div className="overflow-x-auto mb-3">
+                <table className="w-full">
+                  <thead className="bg-surface-50">
+                    <tr>
+                      <th className="table-header px-3 py-2 text-left">Role</th>
+                      {MATRIX_MODULES.map(m => <th key={m.key} className="table-header px-3 py-2 text-left">{m.label}</th>)}
+                      <th className="table-header px-3 py-2 text-right">Staff</th>
+                      <th className="table-header px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customRoles.map(role => (
+                      <tr key={role.id} className="table-row">
+                        <td className="table-cell font-medium text-xs">{role.label}</td>
+                        {MATRIX_MODULES.map(m => (
+                          <td key={m.key} className="table-cell text-xs">
+                            <span className={role.permissions.includes(m.key) ? 'text-status-success' : 'text-text-muted'}>{role.permissions.includes(m.key) ? '✓' : '—'}</span>
+                          </td>
+                        ))}
+                        <td className="table-cell text-xs text-right text-text-muted">{role.staff_count}</td>
+                        <td className="table-cell text-right">
+                          <button
+                            onClick={() => deleteRole(role)}
+                            disabled={deletingRoleId === role.id || role.staff_count > 0}
+                            title={role.staff_count > 0 ? `${role.staff_count} staff member(s) currently have this role — reassign them first` : 'Delete this role'}
+                            className="btn-ghost p-1 text-status-error disabled:opacity-30"
+                          >
+                            <X size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {showAddRole && (
+              <div className="border border-border rounded-xl p-4 space-y-3">
+                <div>
+                  <label className="block text-xs text-text-muted mb-1">Role name</label>
+                  <input
+                    type="text" className="input" placeholder="e.g. Delivery Rider"
+                    value={newRoleLabel} onChange={e => setNewRoleLabel(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-text-muted mb-1.5">What can this role access?</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-2">
+                    {MATRIX_MODULES.map(m => (
+                      <label key={m.key} className="flex items-center gap-2 text-xs cursor-pointer">
+                        <input
+                          type="checkbox" checked={newRolePermissions.includes(m.key)}
+                          onChange={() => togglePermission(m.key)}
+                          className="rounded border-border"
+                        />
+                        {m.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={() => { setShowAddRole(false); setNewRoleLabel(''); setNewRolePermissions([]); }}
+                    className="btn-secondary flex-1 text-xs py-2"
+                  >
+                    Cancel
+                  </button>
+                  <button onClick={createRole} disabled={savingRole} className="btn-primary flex-1 text-xs py-2 disabled:opacity-50">
+                    {savingRole ? 'Creating…' : 'Create Role'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </Modal>

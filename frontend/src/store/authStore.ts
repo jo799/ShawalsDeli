@@ -6,7 +6,8 @@ import { create } from 'zustand';
 // service) with zero path-alias configuration required anywhere. The alias
 // remains available in tsconfig.json/vite.config.ts for other files that
 // want it; this file just doesn't depend on it.
-import { hasPermission as checkPermission, type Permission } from '../../../shared/permissions';
+import { hasPermission as checkPermission, ROLES, ROUTE_PERMISSIONS, type Permission } from '../../../shared/permissions';
+import api from '@/lib/api';
 
 interface User {
   id: string;
@@ -20,6 +21,16 @@ interface AuthState {
   user: User | null;
   token: string | null;
   isAuthenticated: boolean;
+  // A custom role's permissions live in the database, not in the compiled
+  // shared/permissions.ts map — fetched once after login/session-restore
+  // and cached here, since hasPermission is called synchronously all over
+  // the app (including at render time in the sidebar) and can't itself
+  // await a network call. customRolePermissionsLoaded distinguishes
+  // "haven't checked yet" from "checked, and this role genuinely has zero
+  // permissions" - hasPermission fails closed (denies) during that brief
+  // loading window rather than momentarily granting access it shouldn't.
+  customRolePermissions: Permission[] | null;
+  customRolePermissionsLoaded: boolean;
   login: (user: User, token: string) => void;
   // Alias for `login` — identical behavior (persist to localStorage, update
   // the store). Kept as a separate method because AuthBootstrap.tsx calls
@@ -29,7 +40,27 @@ interface AuthState {
   setSession: (user: User, token: string) => void;
   logout: () => void;
   hasPermission: (permission: Permission) => boolean;
+  canAccessRoute: (path: string) => boolean;
 }
+
+const isBuiltInRole = (role: string) => (ROLES as readonly string[]).includes(role);
+
+// Fire-and-forget: looks up this one role's permissions (the endpoint is
+// open to any authenticated user, unlike the full custom-roles list, since
+// a custom-role user needs to resolve their own access without needing
+// admin/manager rights just to check themselves). Silently treats a
+// missing/errored lookup as "no permissions" rather than throwing —
+// consistent with hasPermission's fail-closed default during the loading
+// window itself.
+const loadCustomRolePermissions = async (role: string, set: (partial: Partial<AuthState>) => void) => {
+  if (isBuiltInRole(role)) { set({ customRolePermissions: null, customRolePermissionsLoaded: true }); return; }
+  try {
+    const { data } = await api.get(`/roles/custom/${encodeURIComponent(role)}`);
+    set({ customRolePermissions: data.data.permissions as Permission[], customRolePermissionsLoaded: true });
+  } catch {
+    set({ customRolePermissions: [], customRolePermissionsLoaded: true });
+  }
+};
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: (() => {
@@ -42,24 +73,40 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   })(),
   token: localStorage.getItem('token'),
   isAuthenticated: !!localStorage.getItem('token'),
+  customRolePermissions: null,
+  customRolePermissionsLoaded: false,
 
   login: (user, token) => {
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(user));
-    set({ user, token, isAuthenticated: true });
+    set({ user, token, isAuthenticated: true, customRolePermissionsLoaded: false });
+    loadCustomRolePermissions(user.role, set);
   },
 
   setSession: (user, token) => {
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(user));
-    set({ user, token, isAuthenticated: true });
+    set({ user, token, isAuthenticated: true, customRolePermissionsLoaded: false });
+    loadCustomRolePermissions(user.role, set);
   },
 
   logout: () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    set({ user: null, token: null, isAuthenticated: false });
+    set({ user: null, token: null, isAuthenticated: false, customRolePermissions: null, customRolePermissionsLoaded: false });
   },
 
-  hasPermission: (permission) => checkPermission(get().user?.role, permission),
+  hasPermission: (permission) => {
+    const { user, customRolePermissions, customRolePermissionsLoaded } = get();
+    if (!user) return false;
+    if (isBuiltInRole(user.role)) return checkPermission(user.role, permission);
+    if (!customRolePermissionsLoaded) return false;
+    return (customRolePermissions ?? []).includes(permission);
+  },
+
+  canAccessRoute: (path) => {
+    const permission = ROUTE_PERMISSIONS[path];
+    if (!permission) return true;
+    return get().hasPermission(permission);
+  },
 }));

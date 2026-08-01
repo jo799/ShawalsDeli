@@ -8,12 +8,6 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import { useThemeStore } from '@/store/themeStore';
 import { getInitials } from '@/lib/utils';
-// Relative import rather than the @shared/* alias — this file lives at a
-// fixed location (frontend/src/components/layout/Sidebar.tsx), four levels
-// below the project root where shared/permissions.ts lives, so this
-// resolves correctly in every tool with zero path-alias configuration
-// required. See authStore.ts for the same reasoning.
-import { canAccessRoute } from '../../../../shared/permissions';
 
 const NAV: Array<{ label: string; icon: typeof LayoutDashboard; to: string } | { section: string; to?: undefined }> = [
   { label: 'Dashboard', icon: LayoutDashboard, to: '/' },
@@ -50,7 +44,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
-  const { user, logout } = useAuthStore();
+  const { user, logout, canAccessRoute } = useAuthStore();
   const navigate = useNavigate();
   const handleLogout = () => { logout(); navigate('/login'); };
   const { theme, toggleTheme } = useThemeStore();
@@ -70,7 +64,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
   // visible under it (e.g. a waiter loses the whole "FINANCE" section
   // heading along with Reports and Expenses, rather than seeing an empty
   // label with nothing beneath it).
-  const visibleNav = NAV.filter(item => !item.to || canAccessRoute(user?.role, item.to))
+  const visibleNav = NAV.filter(item => !item.to || canAccessRoute(item.to))
     .filter((item, i, arr) => {
       if (!('section' in item)) return true;
       const next = arr[i + 1];
