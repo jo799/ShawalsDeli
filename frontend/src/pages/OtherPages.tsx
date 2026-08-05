@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Plus, Download, X, Edit2, Trash2, Upload, FileText, CreditCard, TrendingUp, Calendar, AlertTriangle, ChevronDown } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
-import { formatCurrency, formatDate, toLocalDateString, getPeriodDateRange } from '@/lib/utils';
+import { formatCurrency, formatDate, toLocalDateString, getPeriodDateRange, resolveFileUrl } from '@/lib/utils';
 import { PageHeader, Pagination, SearchInput, LoadingPage, Modal, FinancialSummaryExportButton } from '@/components/ui';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAuthStore } from '@/store/authStore';
@@ -322,7 +322,7 @@ export function ExpensesPage() {
                       </td>
                       <td className="table-cell" onClick={e => e.stopPropagation()}>
                         {exp.receipt_url ? (
-                          <a href={exp.receipt_url} target="_blank" rel="noreferrer" className="btn-ghost p-1 inline-flex" title="View receipt"><FileText size={14} className="text-status-info" /></a>
+                          <a href={resolveFileUrl(exp.receipt_url)} target="_blank" rel="noreferrer" className="btn-ghost p-1 inline-flex" title="View receipt"><FileText size={14} className="text-status-info" /></a>
                         ) : canManage ? (
                           <label className={`btn-ghost p-1 inline-flex cursor-pointer ${uploadingReceiptFor === exp.id ? 'opacity-50 pointer-events-none' : ''}`} title="Upload receipt">
                             <Upload size={14} />
@@ -379,7 +379,7 @@ export function ExpensesPage() {
                 </div>
               ))}
               {selectedExpense.receipt_url && (
-                <a href={selectedExpense.receipt_url} target="_blank" rel="noreferrer" className="btn-secondary w-full text-xs py-2 flex items-center justify-center gap-1.5 mt-2">
+                <a href={resolveFileUrl(selectedExpense.receipt_url)} target="_blank" rel="noreferrer" className="btn-secondary w-full text-xs py-2 flex items-center justify-center gap-1.5 mt-2">
                   <FileText size={13} /> View Receipt
                 </a>
               )}

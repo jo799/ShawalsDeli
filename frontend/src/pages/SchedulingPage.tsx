@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Printer, Plus, Copy, X, Clock, LogIn, LogOut, Stethoscope, Upload, Bell, BellOff, CalendarOff, Check, Users, CalendarDays } from 'lucide-react';
 import { addDays, startOfWeek, format, isSameDay, addWeeks, subWeeks, subDays, addMonths, subMonths } from 'date-fns';
 import api from '@/lib/api';
-import { getInitials } from '@/lib/utils';
+import { getInitials, resolveFileUrl } from '@/lib/utils';
 import { PageHeader } from '@/components/ui';
 import { useAuthStore } from '@/store/authStore';
 import { getPushSubscriptionStatus, subscribeToKitchenAlerts, unsubscribeFromKitchenAlerts } from '@/lib/pushNotifications';
@@ -867,7 +867,7 @@ export default function SchedulingPage() {
                     }`}>{r.status.toUpperCase()}</span>
                   </div>
                   <p className="text-xs text-text-secondary">"{r.message}"</p>
-                  {r.receipt_url && <a href={r.receipt_url} target="_blank" rel="noreferrer" className="text-xs text-brand hover:underline">View uploaded receipt</a>}
+                  {r.receipt_url && <a href={resolveFileUrl(r.receipt_url)} target="_blank" rel="noreferrer" className="text-xs text-brand hover:underline">View uploaded receipt</a>}
                   {r.status === 'declined' && r.decline_reason && (
                     <p className="text-xs text-status-error">Reason: {r.decline_reason}</p>
                   )}
@@ -897,7 +897,7 @@ export default function SchedulingPage() {
                     <span className="text-xs text-text-muted">{format(new Date(r.requested_date), 'EEE, MMM d')}</span>
                   </div>
                   <p className="text-xs text-text-secondary">"{r.message}"</p>
-                  {r.receipt_url && <a href={r.receipt_url} target="_blank" rel="noreferrer" className="text-xs text-brand hover:underline flex items-center gap-1"><Upload size={11} /> View receipt</a>}
+                  {r.receipt_url && <a href={resolveFileUrl(r.receipt_url)} target="_blank" rel="noreferrer" className="text-xs text-brand hover:underline flex items-center gap-1"><Upload size={11} /> View receipt</a>}
                   <p className="text-[10px] text-text-muted">Submitted {format(new Date(r.created_at), 'MMM d, h:mm a')}</p>
 
                   {decliningRequestId === r.id ? (

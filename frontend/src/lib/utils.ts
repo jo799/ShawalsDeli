@@ -82,6 +82,18 @@ export const resolveMenuImage = (imageUrl?: string, name?: string): string => {
   return BACKEND_ORIGIN ? `${BACKEND_ORIGIN}${imageUrl}` : imageUrl;
 };
 
+// Same fix as resolveMenuImage above, generalized for any other
+// backend-relative file path we link to directly (sick-off receipts,
+// expense receipts, etc.) rather than render as an <img>. Without this,
+// a stored "/uploads/..." path resolves against the frontend's own
+// origin when clicked, which 404s since the frontend's nginx has no
+// /uploads route or files — only the backend does.
+export const resolveFileUrl = (url?: string | null): string | undefined => {
+  if (!url) return undefined;
+  if (/^(https?:|data:)/.test(url)) return url;
+  return BACKEND_ORIGIN ? `${BACKEND_ORIGIN}${url}` : url;
+};
+
 export const getStatusColor = (status: string): string => {
   const map: Record<string, string> = {
     active: 'success', completed: 'success', received: 'success', approved: 'success', available: 'success', in_stock: 'success',
