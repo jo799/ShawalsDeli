@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Search, RefreshCw, MoreVertical, UserPlus, Shield, Users, UserCheck, UserMinus, Wallet, Check, X, Edit2, KeyRound, UserX, UserCheck2 } from 'lucide-react';
+import { Plus, Search, RefreshCw, MoreVertical, UserPlus, Shield, Users, UserCheck, UserMinus, Wallet, Check, X, Edit2, KeyRound, UserX, UserCheck2, Trash2 } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
 // Relative import rather than the @shared/* alias — this file lives at a
@@ -163,6 +163,23 @@ export default function StaffPage() {
       fetchStaff();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update status';
+      toast.error(msg);
+    }
+  };
+
+  // Permanent removal — separate from toggleActive above, which only ever
+  // flips a reversible status flag. This one can't be undone, so it gets
+  // its own explicit, harsher confirmation copy rather than reusing
+  // deactivate's wording.
+  const deleteStaffMember = async (m: StaffMember) => {
+    setOpenMenuId(null);
+    if (!confirmDelete(`Permanently delete ${m.full_name}? This removes their account for good — it can't be undone like deactivating can. Their past orders, expenses, and other records stay on file, just without their name attached.`)) return;
+    try {
+      await api.delete(`/staff/${m.id}`);
+      toast.success(`${m.full_name} was permanently removed`);
+      fetchStaff();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to delete staff member';
       toast.error(msg);
     }
   };
@@ -355,6 +372,11 @@ export default function StaffPage() {
                             <button onClick={() => toggleActive(member)} className={`w-full text-left px-3 py-2 text-xs hover:bg-surface-50 flex items-center gap-2 ${member.status === 'inactive' ? 'text-status-success' : 'text-status-error'}`}>
                               {member.status === 'inactive' ? <><UserCheck2 size={12} /> Reactivate</> : <><UserX size={12} /> Deactivate</>}
                             </button>
+                            {currentUser?.role === 'administrator' && member.id !== currentUser?.id && (
+                              <button onClick={() => deleteStaffMember(member)} className="w-full text-left px-3 py-2 text-xs hover:bg-surface-50 flex items-center gap-2 text-status-error border-t border-border">
+                                <Trash2 size={12} /> Delete Permanently
+                              </button>
+                            )}
                           </div>
                         )}
                       </td>
