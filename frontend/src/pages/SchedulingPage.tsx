@@ -109,6 +109,12 @@ export default function SchedulingPage() {
   const [showMyRequests, setShowMyRequests] = useState(false);
   const [reviewQueue, setReviewQueue] = useState<SickOffRequest[]>([]);
   const [showReviewPanel, setShowReviewPanel] = useState(false);
+  // Filter for the admin panel's list — the header badge and 30s poll
+  // above always track pending count specifically, regardless of which
+  // tab is selected in here.
+  const [reviewFilter, setReviewFilter] = useState<'pending' | 'approved' | 'declined' | 'all'>('pending');
+  const [filteredRequests, setFilteredRequests] = useState<SickOffRequest[]>([]);
+  const [loadingFilteredRequests, setLoadingFilteredRequests] = useState(false);
   const [decliningRequestId, setDecliningRequestId] = useState<string | null>(null);
   const [declineReasonInput, setDeclineReasonInput] = useState('');
   const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
@@ -263,6 +269,20 @@ export default function SchedulingPage() {
     return () => clearInterval(interval);
   }, [fetchReviewQueue]);
 
+  // The panel's own list, independent of the pending-only badge above —
+  // this is what lets an admin actually browse everyone's approved and
+  // declined requests, not just what's still waiting on them. Refetches
+  // whenever the panel is open and the tab changes.
+  const fetchFilteredRequests = useCallback(async () => {
+    if (!isAdmin) return;
+    setLoadingFilteredRequests(true);
+    try {
+      const { data } = await api.get('/sick-off-requests', { params: { status: reviewFilter } });
+      setFilteredRequests(data.data);
+    } catch { /* non-critical */ } finally { setLoadingFilteredRequests(false); }
+  }, [isAdmin, reviewFilter]);
+  useEffect(() => { if (showReviewPanel) fetchFilteredRequests(); }, [showReviewPanel, fetchFilteredRequests]);
+
   useEffect(() => { if (isAdmin) getPushSubscriptionStatus().then(setPushStatus); }, [isAdmin]);
 
   const handleTogglePush = async () => {
@@ -314,6 +334,7 @@ export default function SchedulingPage() {
       const { data } = await api.post(`/sick-off-requests/${r.id}/approve`);
       toast.success(data.message || 'Request approved');
       fetchReviewQueue();
+      fetchFilteredRequests();
       fetchData();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not approve';
@@ -329,6 +350,7 @@ export default function SchedulingPage() {
       setDecliningRequestId(null);
       setDeclineReasonInput('');
       fetchReviewQueue();
+      fetchFilteredRequests();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not decline';
       toast.error(msg);
@@ -879,28 +901,62 @@ export default function SchedulingPage() {
         </div>
       )}
 
-      {/* Admin review queue */}
+      {/* Admin review panel — Pending tab is the actionable queue;
+          Approved/Declined/All let an admin look back at everyone's
+          history, not just what's still waiting on them. */}
       {showReviewPanel && (
         <div className="modal-backdrop" onClick={() => setShowReviewPanel(false)}>
           <div className="modal max-w-md" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-border flex items-center justify-between">
-              <h2 className="section-title">Pending Sick-Off Requests</h2>
+              <h2 className="section-title">Staff Sick-Off Requests</h2>
               <button onClick={() => setShowReviewPanel(false)} className="btn-ghost p-1"><X size={16} /></button>
             </div>
+            <div className="px-5 pt-3 flex gap-1.5 border-b border-border">
+              {(['pending', 'approved', 'declined', 'all'] as const).map(f => (
+                <button
+                  key={f}
+                  onClick={() => setReviewFilter(f)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-t-lg border-b-2 -mb-px transition-colors ${
+                    reviewFilter === f ? 'border-brand text-brand' : 'border-transparent text-text-muted hover:text-text-secondary'
+                  }`}
+                >
+                  {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
+                </button>
+              ))}
+            </div>
             <div className="p-5 space-y-3 max-h-[60vh] overflow-y-auto">
-              {reviewQueue.length === 0 ? (
-                <p className="text-sm text-text-muted text-center py-8">No requests waiting on you.</p>
-              ) : reviewQueue.map(r => (
+              {loadingFilteredRequests ? (
+                <p className="text-sm text-text-muted text-center py-8">Loading…</p>
+              ) : filteredRequests.length === 0 ? (
+                <p className="text-sm text-text-muted text-center py-8">
+                  {reviewFilter === 'pending' ? 'No requests waiting on you.' : `No ${reviewFilter === 'all' ? '' : reviewFilter} requests yet.`}
+                </p>
+              ) : filteredRequests.map(r => (
                 <div key={r.id} className="border border-border rounded-xl p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="font-semibold text-sm">{r.requested_by_name}</span>
-                    <span className="text-xs text-text-muted">{format(new Date(r.requested_date), 'EEE, MMM d')}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-text-muted">{format(new Date(r.requested_date), 'EEE, MMM d')}</span>
+                      {reviewFilter === 'all' && (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          r.status === 'approved' ? 'bg-status-success/10 text-status-success' :
+                          r.status === 'declined' ? 'bg-status-error/10 text-status-error' :
+                          'bg-status-warning/10 text-status-warning'
+                        }`}>{r.status.toUpperCase()}</span>
+                      )}
+                    </div>
                   </div>
                   <p className="text-xs text-text-secondary">"{r.message}"</p>
                   {r.receipt_url && <a href={resolveFileUrl(r.receipt_url)} target="_blank" rel="noreferrer" className="text-xs text-brand hover:underline flex items-center gap-1"><Upload size={11} /> View receipt</a>}
                   <p className="text-[10px] text-text-muted">Submitted {format(new Date(r.created_at), 'MMM d, h:mm a')}</p>
+                  {r.status === 'declined' && r.decline_reason && (
+                    <p className="text-xs text-status-error">Reason: {r.decline_reason}</p>
+                  )}
+                  {r.reviewed_by_name && r.status !== 'pending' && (
+                    <p className="text-[10px] text-text-muted">Reviewed by {r.reviewed_by_name}</p>
+                  )}
 
-                  {decliningRequestId === r.id ? (
+                  {r.status === 'pending' && (decliningRequestId === r.id ? (
                     <div className="space-y-2 pt-1">
                       <input
                         type="text" autoFocus
@@ -937,7 +993,7 @@ export default function SchedulingPage() {
                         <Check size={12} /> {processingRequestId === r.id ? 'Approving…' : 'Approve'}
                       </button>
                     </div>
-                  )}
+                  ))}
                 </div>
               ))}
             </div>
