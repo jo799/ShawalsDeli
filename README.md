@@ -123,8 +123,7 @@ npm run dev
 
 ### Default Login
 ```
-Email: joseph.kimunya@shawalsdei.com
-Password: password123
+see .env.example and seed configuration for locally generated development credentials.
 ```
 
 ---
