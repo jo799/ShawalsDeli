@@ -92,6 +92,10 @@ export default function SettingsPage() {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showTableModal, setShowTableModal] = useState(false);
   const [showKdsModal, setShowKdsModal] = useState(false);
+  const [showClearAllDataModal, setShowClearAllDataModal] = useState(false);
+  const [clearDataPassword, setClearDataPassword] = useState('');
+  const [clearDataConfirmName, setClearDataConfirmName] = useState('');
+  const [clearingAllData, setClearingAllData] = useState(false);
   const [savingPanel, setSavingPanel] = useState(false);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [storage, setStorage] = useState<StorageUsage | null>(null);
@@ -262,6 +266,33 @@ export default function SettingsPage() {
       document.body.appendChild(a); a.click(); a.remove();
       window.URL.revokeObjectURL(url);
     } catch { toast.error('Failed to download backup'); }
+  };
+
+  // The business name typed here is checked against what's actually saved
+  // (server-side, authoritative) — this local match is just so the button
+  // isn't clickable with an obvious typo, not the real gate.
+  const clearAllDataConfirmMatches = clearDataConfirmName.trim().length > 0
+    && clearDataConfirmName === (business.business_name || "Shawal's Deli");
+
+  const submitClearAllData = async () => {
+    setClearingAllData(true);
+    try {
+      const { data } = await api.post('/settings/clear-all-data', {
+        password: clearDataPassword,
+        confirm_business_name: clearDataConfirmName,
+      });
+      toast.success(data.message || 'All data cleared', { duration: 6000 });
+      // Every staff account but this one, the whole menu, and all
+      // transactional data are gone — practically nothing already loaded
+      // in memory (across this page and every store) is still valid, so
+      // a full reload is the honest way to reflect that rather than
+      // trying to selectively patch a dozen pieces of state.
+      window.location.reload();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to clear data';
+      toast.error(msg);
+      setClearingAllData(false);
+    }
   };
 
   const storageData = storage ? [
@@ -668,11 +699,12 @@ export default function SettingsPage() {
                   <div className="card p-5 space-y-3 border-status-error/30">
                     <h3 className="font-semibold text-sm text-status-error">Danger Zone</h3>
                     <p className="text-xs text-text-muted">
-                      A real "wipe everything" action isn't built yet — deliberately. Something this destructive needs
-                      a much safer confirmation flow (e.g. typing the business name to confirm) than a single click
-                      before it should exist at all.
+                      Permanently erases every other staff account, the entire menu, and all transactional data
+                      (orders, payments, customers, inventory, expenses, reservations, schedules, attendance, audit
+                      history). Only your own login survives. Business settings (name, currency, logo) are kept.
+                      A safety backup is taken automatically right before the wipe.
                     </p>
-                    <button onClick={() => toast('Not built yet, by design — see the note above.', { icon: 'ℹ️' })}
+                    <button onClick={() => { setClearDataPassword(''); setClearDataConfirmName(''); setShowClearAllDataModal(true); }}
                       className="btn-secondary text-status-error border-status-error/30 hover:bg-status-error/10 flex items-center gap-2">
                       <Trash2 size={13} /> Clear All Data
                     </button>
@@ -877,6 +909,57 @@ export default function SettingsPage() {
               }, () => setShowKdsModal(false), 'Kitchen display settings')}
               disabled={savingPanel} className="btn-primary flex-1 disabled:opacity-50"
             >{savingPanel ? 'Saving…' : 'Save'}</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Clear All Data — deliberately not reachable with a single click.
+          Two independent confirmations: current password (proves it's
+          really the logged-in admin, right now) and the exact business
+          name typed out (the same pattern used for destructive actions on
+          most major platforms, precisely because a checkbox is too cheap
+          for a consequence this size). */}
+      <Modal open={showClearAllDataModal} onClose={() => !clearingAllData && setShowClearAllDataModal(false)} title="Clear All Data" size="sm">
+        <div className="space-y-4">
+          <div className="bg-status-error/10 border border-status-error/30 rounded-lg p-3 space-y-1.5">
+            <p className="text-xs font-semibold text-status-error">This cannot be undone.</p>
+            <p className="text-xs text-text-secondary">
+              Every other staff account, the entire menu, and all orders, payments, customers, inventory, expenses,
+              reservations, schedules, attendance, and audit history will be permanently erased. Only your own login
+              will remain. A safety backup is saved automatically right before the wipe, but restoring from it means
+              contacting whoever manages the database — this isn't a one-click undo.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Your current password</label>
+            <input
+              type="password" autoComplete="current-password" className="input"
+              value={clearDataPassword} onChange={e => setClearDataPassword(e.target.value)}
+              placeholder="Confirm it's really you"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-text-muted mb-1">
+              Type <span className="font-semibold text-text-primary">{business.business_name || "Shawal's Deli"}</span> to confirm
+            </label>
+            <input
+              type="text" className="input"
+              value={clearDataConfirmName} onChange={e => setClearDataConfirmName(e.target.value)}
+              placeholder={business.business_name || "Shawal's Deli"}
+            />
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <button onClick={() => setShowClearAllDataModal(false)} disabled={clearingAllData} className="btn-secondary flex-1 disabled:opacity-50">Cancel</button>
+            <button
+              onClick={submitClearAllData}
+              disabled={clearingAllData || !clearDataPassword || !clearAllDataConfirmMatches}
+              className="flex-1 text-sm py-2 rounded-lg bg-status-error text-white hover:bg-status-error/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2"
+            >
+              <Trash2 size={14} /> {clearingAllData ? 'Wiping…' : 'Permanently Clear All Data'}
+            </button>
           </div>
         </div>
       </Modal>
