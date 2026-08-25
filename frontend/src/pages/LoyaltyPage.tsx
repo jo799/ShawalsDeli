@@ -267,7 +267,7 @@ export default function LoyaltyPointsPage() {
             )}
           </div>
           <p className="text-lg font-bold text-brand">KES {stats.point_value_kes} <span className="text-xs text-text-muted font-normal">/ point</span></p>
-          <p className="text-[11px] text-text-muted mt-1">e.g. 100 points = {formatCurrency(100 * stats.point_value_kes)} when redeemed.</p>
+          <p className="text-[11px] text-text-muted mt-1">e.g. 1 point = {formatCurrency(100 * stats.point_value_kes)} when redeemed.</p>
         </div>
 
         {canManage && (
