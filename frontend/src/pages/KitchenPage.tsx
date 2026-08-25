@@ -13,7 +13,7 @@ interface Order {
   total?: number; amount_paid?: number;
   special_instructions?: string;
   prepared_by?: string; prepared_by_name?: string;
-  items?: Array<{ item_name: string; quantity: number }>;
+  items?: Array<{ item_name: string; quantity: number; status?: string }>;
 }
 
 interface Chef { id: string; full_name: string; role: string; }
@@ -335,7 +335,7 @@ export default function KitchenPage() {
       const activeOrders = activeRes.data.data.filter((o: Order) =>
         ['new', 'preparing', 'ready'].includes(o.status)
       );
-      const withItems = await Promise.all(
+      const withItemsRaw = await Promise.all(
         activeOrders.slice(0, 20).map(async (order: Order) => {
           try {
             const { data: detail } = await api.get(`/orders/${order.id}`);
@@ -343,6 +343,15 @@ export default function KitchenPage() {
           } catch { return order; }
         })
       );
+      // Ready-to-eat items (Bhajia, pre-made snacks) are marked 'served'
+      // the instant the order is created — there's nothing for the kitchen
+      // to do with them, so they're stripped from what's shown here rather
+      // than cluttering a chef's prep list with an item they'll never
+      // touch. An order where EVERY item is already served this way (a
+      // pure ready-to-eat sale) is dropped from the queue entirely.
+      const withItems = withItemsRaw
+        .map((order: Order) => ({ ...order, items: order.items?.filter(i => i.status !== 'served') }))
+        .filter((order: Order) => (order.items?.length ?? 0) > 0);
 
       // A "new" order is one that wasn't in the previous poll's id set — not
       // just "orders.length changed", which would also fire when one gets

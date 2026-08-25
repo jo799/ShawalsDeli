@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Search, Grid, List, Star, Edit2, Trash2, X, RotateCcw } from 'lucide-react';
+import { Plus, Search, Grid, List, Star, Edit2, Trash2, X, RotateCcw, Zap } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, cn, resolveMenuImage, menuImagePlaceholder } from '@/lib/utils';
@@ -10,13 +10,13 @@ interface MenuItem {
   id: string; name: string; description: string; price: number; cost: number;
   category_id: string; category_name: string; image_url?: string;
   preparation_time: number; status: string; tags?: string[]; is_featured?: boolean;
-  track_stock?: boolean; stock_quantity?: number; reorder_level?: number; barcode?: string;
+  track_stock?: boolean; stock_quantity?: number; reorder_level?: number; barcode?: string; ready_to_eat?: boolean;
 }
 interface Category { id: string; name: string; item_count: number; }
 
 const EMPTY_ITEM = {
   name: '', description: '', price: 0, cost: 0, category_id: '', preparation_time: 15, status: 'available', tags: [] as string[], image_url: '',
-  track_stock: false, stock_quantity: 0, reorder_level: 5, barcode: '',
+  track_stock: false, stock_quantity: 0, reorder_level: 5, barcode: '', ready_to_eat: false,
 };
 
 export default function MenuPage() {
@@ -77,7 +77,7 @@ export default function MenuPage() {
         category_id: item.category_id, preparation_time: item.preparation_time, status: item.status,
         tags: item.tags || [], image_url: item.image_url || '',
         track_stock: item.track_stock || false, stock_quantity: item.stock_quantity ?? 0, reorder_level: item.reorder_level ?? 5,
-        barcode: item.barcode || '',
+        barcode: item.barcode || '', ready_to_eat: item.ready_to_eat || false,
       });
       setSelected(item);
     } else {
@@ -251,6 +251,11 @@ export default function MenuPage() {
                       onError={e => { (e.target as HTMLImageElement).src = menuImagePlaceholder(item.name); }}
                     />
                     {item.is_featured && <Star size={14} className="absolute top-2 left-2 text-brand fill-brand" />}
+                    {item.ready_to_eat && (
+                      <span className="absolute top-2 left-2 bg-status-success/90 text-white text-[9px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5" style={item.is_featured ? { left: 'auto', right: 32, top: 8 } : undefined} title="Ready to eat — skips the kitchen">
+                        <Zap size={9} /> Ready
+                      </span>
+                    )}
                     <button className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity w-6 h-6 bg-surface-card/80 rounded flex items-center justify-center">
                       <Star size={12} className="text-text-muted" />
                     </button>
@@ -473,6 +478,26 @@ export default function MenuPage() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Ready-to-eat — items that skip the kitchen entirely (Bhajia,
+                pre-made snacks). Set once here rather than decided per-sale,
+                so a cashier never has to remember to flag it. A mixed order
+                still correctly sends only the non-ready items to the
+                kitchen. */}
+            <div className="border border-border rounded-lg p-3 bg-surface-50/50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-text-primary">Ready to eat — skip the kitchen</p>
+                  <p className="text-[11px] text-text-muted mt-0.5">For items that need no preparation. Won't appear on the Kitchen Display; the order completes as soon as it's paid for.</p>
+                </div>
+                <button
+                  onClick={() => setFormData(p => ({ ...p, ready_to_eat: !p.ready_to_eat }))}
+                  className={`w-10 h-5 rounded-full transition-colors relative shrink-0 ml-3 ${formData.ready_to_eat ? 'bg-status-success' : 'bg-surface-50 border border-border'}`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${formData.ready_to_eat ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
             </div>
 
             <div>

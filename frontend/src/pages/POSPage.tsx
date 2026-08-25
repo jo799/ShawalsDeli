@@ -348,8 +348,7 @@ export default function POSPage() {
     ...(posConfig.enableCard && isOnline ? ['Card'] : []),
     ...(posConfig.enableTill ? ['Till'] : []),
     ...(isOnline ? ['Split Bill'] : []),
-    ...(posConfig.enablePointsRedemption && isOnline && (selectedCustomer?.available_points || 0) > 0 ? ['Points'] : []),
-  ], [posConfig.enableMpesa, posConfig.enableCard, posConfig.enableTill, posConfig.enablePointsRedemption, isOnline, selectedCustomer?.available_points]);
+  ], [posConfig.enableMpesa, posConfig.enableCard, posConfig.enableTill, isOnline]);
   const maxPointsUsable = Math.min(
     selectedCustomer?.available_points || 0,
     pointValueKes > 0 ? Math.floor(balanceDueDisplay / pointValueKes) : 0
@@ -834,7 +833,6 @@ export default function POSPage() {
     if (paymentMethod === 'M-Pesa')    openMpesaModal();
     else if (paymentMethod === 'Card') openCardModal();
     else if (paymentMethod === 'Split Bill') setShowSplitModal(true);
-    else if (paymentMethod === 'Points') payWithPoints();
     else if (!isOnline) payCashOrCardOffline(paymentMethod.toLowerCase() as 'cash' | 'card' | 'till');
     else payCashOrCard(paymentMethod.toLowerCase() as 'cash' | 'card' | 'till');
   };
@@ -1159,6 +1157,35 @@ export default function POSPage() {
               Award loyalty points on this sale
             </label>
           )}
+
+          {/* Redeem points right here in the cart, independent of whatever
+              payment method ends up covering the rest — apply points first
+              to shrink the balance, then pay the remainder with Cash,
+              M-Pesa, Card, whatever. payWithPoints already handles a
+              partial redemption correctly (settleAfterPayment only closes
+              the order once the balance actually reaches zero). */}
+          {selectedCustomer && (selectedCustomer.available_points || 0) > 0 && posConfig.enablePointsRedemption && (
+            <div className="mt-2 bg-brand/5 border border-brand/20 rounded-xl p-2.5">
+              <label className="block text-[11px] font-medium text-text-secondary mb-1">
+                Redeem points — {selectedCustomer.available_points} available, up to {maxPointsUsable} usable on this balance
+              </label>
+              <div className="flex gap-1.5">
+                <input
+                  type="number" min={0} max={maxPointsUsable} step={1}
+                  value={pointsToRedeem}
+                  onChange={e => setPointsToRedeem(e.target.value)}
+                  placeholder={String(maxPointsUsable)}
+                  className="input text-sm py-1.5 flex-1"
+                  disabled={processingPayment}
+                />
+                <button type="button" onClick={() => setPointsToRedeem(String(maxPointsUsable))} disabled={processingPayment} className="btn-secondary text-xs px-2.5 disabled:opacity-50">Max</button>
+                <button type="button" onClick={payWithPoints} disabled={processingPayment || maxPointsUsable <= 0} className="btn-primary text-xs px-3 disabled:opacity-50">Apply</button>
+              </div>
+              <p className="text-[11px] text-brand mt-1">
+                = {formatCurrency((pointsToRedeem ? Number(pointsToRedeem) : maxPointsUsable) * pointValueKes)}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Cart items list */}
@@ -1282,37 +1309,16 @@ export default function POSPage() {
               only part of the balance via this method, see what's still
               owed, then pick a different method (e.g. M-Pesa, then Cash)
               for the rest. */}
-          {paymentMethod === 'Points' ? (
-            <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">
-                Points to redeem — {selectedCustomer?.available_points || 0} available, up to {maxPointsUsable} usable on this balance
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="number" min={0} max={maxPointsUsable} step={1}
-                  value={pointsToRedeem}
-                  onChange={e => setPointsToRedeem(e.target.value)}
-                  placeholder={String(maxPointsUsable)}
-                  className="input font-bold text-lg flex-1"
-                />
-                <button type="button" onClick={() => setPointsToRedeem(String(maxPointsUsable))} className="btn-secondary text-xs px-3">Max</button>
-              </div>
-              <p className="text-xs text-brand mt-1">
-                = {formatCurrency((pointsToRedeem ? Number(pointsToRedeem) : maxPointsUsable) * pointValueKes)}
-              </p>
-            </div>
-          ) : (
-            <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">Amount to charge now</label>
-              <input
-                type="number" min={0} step={1}
-                value={tenderAmount}
-                onChange={e => setTenderAmount(e.target.value)}
-                placeholder={String(activeOrder ? Math.max(0, activeOrder.total - activeOrder.amount_paid) : total)}
-                className="input font-bold text-lg"
-              />
-            </div>
-          )}
+          <div>
+            <label className="block text-xs font-medium text-text-secondary mb-1">Amount to charge now</label>
+            <input
+              type="number" min={0} step={1}
+              value={tenderAmount}
+              onChange={e => setTenderAmount(e.target.value)}
+              placeholder={String(activeOrder ? Math.max(0, activeOrder.total - activeOrder.amount_paid) : total)}
+              className="input font-bold text-lg"
+            />
+          </div>
 
           {/* Payment method buttons */}
           <div className={`grid gap-2 mt-1 grid-cols-3 ${
