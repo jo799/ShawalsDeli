@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Search, Scan, ShoppingCart, X, Plus, Minus,
   Trash2, ChevronDown, Phone, CheckCircle, AlertCircle, Loader,
-  Pause, Save, Banknote, Smartphone, CreditCard, Shuffle, User, Star, Pencil, Landmark
+  Pause, Save, Banknote, Smartphone, CreditCard, Shuffle, User, Star, Pencil, Landmark, Zap
 } from 'lucide-react';
 import api from '@/lib/api';
 import { enqueueSale } from '@/lib/offlineSync/queue';
@@ -14,7 +14,7 @@ import { formatCurrency, resolveMenuImage, menuImagePlaceholder } from '@/lib/ut
 import toast from 'react-hot-toast';
 import Receipt from '@/components/Receipt';
 
-interface MenuItem  { id: string; name: string; price: number; category_name: string; image_url?: string; tags?: string[]; track_stock?: boolean; stock_quantity?: number; reorder_level?: number; status?: string; }
+interface MenuItem  { id: string; name: string; price: number; category_name: string; image_url?: string; tags?: string[]; track_stock?: boolean; stock_quantity?: number; reorder_level?: number; status?: string; ready_to_eat?: boolean; }
 interface CartItem  extends MenuItem { quantity: number; }
 interface Category  { id: string; name: string; item_count: number; }
 interface RestaurantTable { id: string; table_number: string; status: string; capacity?: number; area?: string; }
@@ -434,9 +434,14 @@ export default function POSPage() {
      reaches zero; otherwise keeps activeOrder open so the cashier can apply
      a different method for the rest, and pre-fills the amount field with
      exactly what's still owed. */
-  const settleAfterPayment = (order: { id: string; order_number: string; type: string; total: number }, balanceRemaining: number) => {
+  const settleAfterPayment = (order: { id: string; order_number: string; type: string; total: number }, balanceRemaining: number, orderStatus?: string) => {
     if (balanceRemaining <= 0.01) {
-      toast.success(`Order #${order.order_number} sent to kitchen!`);
+      // A fully ready-to-eat order (Bhajia, pre-made snacks) is marked
+      // 'completed' the instant it's paid — it never touches the kitchen at
+      // all, so telling the cashier it was "sent to kitchen" would be
+      // straightforwardly wrong. Every other order still genuinely does go
+      // to the kitchen, same message as always.
+      toast.success(orderStatus === 'completed' ? `Order #${order.order_number} complete — ready to serve!` : `Order #${order.order_number} sent to kitchen!`);
       printReceipt(order.id);
       setCart([]);
       setSpecialInstructions(''); setShowInstructionsInput(false);
@@ -473,7 +478,7 @@ export default function POSPage() {
       if (!(amount > 0)) { toast.error('Enter an amount to charge'); return; }
       const res = await api.post(`/orders/${order.id}/payment`, { payment_method: method, amount, award_loyalty: awardLoyalty });
       if (res.data.points_awarded > 0) toast.success(`+${res.data.points_awarded} loyalty points earned`, { icon: '⭐' });
-      settleAfterPayment(order, res.data.balance_remaining);
+      settleAfterPayment(order, res.data.balance_remaining, res.data.order_status);
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Checkout failed';
       toast.error(msg);
@@ -546,7 +551,7 @@ export default function POSPage() {
       const res = await api.post(`/orders/${order.id}/payment`, { payment_method: 'points', points, award_loyalty: awardLoyalty });
       toast.success(`${points} points redeemed (${formatCurrency(points * pointValueKes)})`);
       setPointsToRedeem('');
-      settleAfterPayment(order, res.data.balance_remaining);
+      settleAfterPayment(order, res.data.balance_remaining, res.data.order_status);
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Redemption failed';
       toast.error(msg);
@@ -579,7 +584,7 @@ export default function POSPage() {
       if (o.loyalty_points_earned > 0) toast.success(`+${o.loyalty_points_earned} loyalty points earned`, { icon: '⭐' });
       setTimeout(() => {
         setShowMpesaModal(false);
-        settleAfterPayment({ id: o.id, order_number: o.order_number, type: o.type, total: Number(o.total) }, balance);
+        settleAfterPayment({ id: o.id, order_number: o.order_number, type: o.type, total: Number(o.total) }, balance, o.status);
       }, 1500);
     } catch {
       // Payment definitely succeeded (we're in this branch because Safaricom
@@ -710,7 +715,7 @@ export default function POSPage() {
           setCardStatus('completed');
           setTimeout(() => {
             setShowCardModal(false);
-            settleAfterPayment(order, data.balance_remaining);
+            settleAfterPayment(order, data.balance_remaining, data.order_status);
           }, 1200);
         } else if (data.status === 'failed') {
           if (cardPollRef.current) clearInterval(cardPollRef.current);
@@ -1032,6 +1037,11 @@ export default function POSPage() {
                       loading="lazy"
                       onError={e => { (e.target as HTMLImageElement).src = menuImagePlaceholder(item.name); }}
                     />
+                    {item.ready_to_eat && (
+                      <span className="absolute top-1.5 left-1.5 bg-status-success/90 text-white text-[9px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5" title="Ready to eat — skips the kitchen">
+                        <Zap size={9} /> Ready
+                      </span>
+                    )}
                     {/* A manager/chef's manual toggle (for dishes with no
                         per-unit inventory count, like pilau) takes priority
                         over the countable-stock badge below — "we're out
@@ -1756,7 +1766,7 @@ export default function POSPage() {
                     });
                     toast.success(`Split ${splitParts} ways (${splitPaymentMethod}) — ${formatCurrency(Math.ceil(order.total / splitParts))} each`);
                     if (res.data.points_awarded > 0) toast.success(`+${res.data.points_awarded} loyalty points earned`, { icon: '⭐' });
-                    settleAfterPayment(order, res.data.balance_remaining);
+                    settleAfterPayment(order, res.data.balance_remaining, res.data.order_status);
                   } catch (e: unknown) {
                     const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Checkout failed';
                     toast.error(msg);
