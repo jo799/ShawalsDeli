@@ -154,6 +154,25 @@ export default function OrdersPage() {
     updateStatus(order.id, 'cancelled');
   };
 
+  // Permanent removal from the database, not another status change — only
+  // offered once an order is already cancelled (the backend enforces this
+  // too), since cancelling is what does the real work of unwinding it
+  // (releasing a table, reversing pending payments). This is cleanup for
+  // something already known to be unwanted, so the confirmation is
+  // deliberately more emphatic than the reversible cancel above.
+  const deleteOrderPermanently = async (order: Order) => {
+    if (!confirmDelete(`Permanently delete order #${order.order_number}? This removes it from the database entirely and cannot be undone.`)) return;
+    try {
+      await api.delete(`/orders/${order.id}`);
+      toast.success(`Order #${order.order_number} permanently deleted`);
+      setSelected(null);
+      fetchOrders();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to delete order';
+      toast.error(msg);
+    }
+  };
+
   const openRefund = () => {
     if (!selected) return;
     const balance = Math.max(0, Number(selected.total) - Number(selected.amount_paid || 0));
@@ -443,6 +462,9 @@ export default function OrdersPage() {
               )}
               {!['completed', 'cancelled'].includes(selected.status) && (
                 <button onClick={() => cancelOrder(selected)} className="btn-secondary w-full py-2 text-sm text-status-error">Cancel Order</button>
+              )}
+              {selected.status === 'cancelled' && isAdmin && (
+                <button onClick={() => deleteOrderPermanently(selected)} className="btn-secondary w-full py-2 text-sm text-status-error border-status-error/30">Delete Permanently</button>
               )}
               <div className={`grid ${canRefund ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
                 <button onClick={() => printReceipt(selected.id)} className="btn-secondary text-xs py-2">🖨 Print Receipt</button>
