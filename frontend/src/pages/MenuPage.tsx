@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Search, Grid, List, Star, Edit2, Trash2, X, RotateCcw, Zap } from 'lucide-react';
+import { Plus, Search, Grid, List, Star, Edit2, Trash2, X, RotateCcw, Zap, Hash } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, cn, resolveMenuImage, menuImagePlaceholder } from '@/lib/utils';
-import { PageHeader, StatusBadge, LoadingPage } from '@/components/ui';
+import { PageHeader, StatusBadge, LoadingPage, Modal } from '@/components/ui';
+import { useAuthStore } from '@/store/authStore';
 import toast from 'react-hot-toast';
 
 interface MenuItem {
@@ -20,6 +21,18 @@ const EMPTY_ITEM = {
 };
 
 export default function MenuPage() {
+  const { hasPermission } = useAuthStore();
+  const canManage = hasPermission('menu.manage');
+  const canAdjustStock = canManage || hasPermission('menu.adjust_stock');
+
+  // Quick stock adjustment — deliberately a separate, narrow modal rather
+  // than reusing the full edit form. Cashier and head_chef can correct a
+  // count here without ever seeing (let alone changing) price, name, or
+  // category, which only canManage users get through the full editor below.
+  const [stockAdjustItem, setStockAdjustItem] = useState<MenuItem | null>(null);
+  const [stockAdjustValue, setStockAdjustValue] = useState('');
+  const [savingStockAdjust, setSavingStockAdjust] = useState(false);
+
   const [items, setItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [showNewCategory, setShowNewCategory] = useState(false);
@@ -103,6 +116,29 @@ export default function MenuPage() {
     } finally { setSavingCategory(false); }
   };
 
+  const openStockAdjust = (item: MenuItem) => {
+    setStockAdjustItem(item);
+    setStockAdjustValue(String(item.stock_quantity ?? 0));
+  };
+
+  const saveStockAdjustment = async () => {
+    if (!stockAdjustItem) return;
+    const qty = Number(stockAdjustValue);
+    if (!Number.isInteger(qty) || qty < 0) { toast.error('Enter a whole number, zero or more'); return; }
+    setSavingStockAdjust(true);
+    try {
+      await api.put(`/menu/items/${stockAdjustItem.id}/stock`, { stock_quantity: qty });
+      toast.success(`${stockAdjustItem.name} stock updated to ${qty}`);
+      setStockAdjustItem(null);
+      fetchData();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update stock';
+      toast.error(msg);
+    } finally {
+      setSavingStockAdjust(false);
+    }
+  };
+
   const saveItem = async () => {
     try {
       setSaving(true);
@@ -123,7 +159,10 @@ export default function MenuPage() {
       }
       setEditing(false);
       fetchData();
-    } catch { toast.error('Failed to save item'); }
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to save item';
+      toast.error(msg);
+    }
     finally { setSaving(false); }
   };
 
@@ -190,9 +229,11 @@ export default function MenuPage() {
         <PageHeader title="Menu" subtitle="Manage your menu items, categories and modifiers">
           <button className="btn-secondary text-sm">Categories</button>
           <button className="btn-secondary text-sm">Modifiers</button>
-          <button onClick={() => openEdit()} className="btn-primary flex items-center gap-2 text-sm">
-            <Plus size={14} /> Add Menu Item
-          </button>
+          {canManage && (
+            <button onClick={() => openEdit()} className="btn-primary flex items-center gap-2 text-sm">
+              <Plus size={14} /> Add Menu Item
+            </button>
+          )}
         </PageHeader>
 
         {/* Category tabs */}
@@ -274,10 +315,13 @@ export default function MenuPage() {
                         <StockBadge item={item} />
                       </div>
                       <div className="flex gap-1">
-                        <button onClick={() => openEdit(item)} className="btn-ghost p-1"><Edit2 size={12} /></button>
-                        {item.status === 'archived'
+                        {canManage && <button onClick={() => openEdit(item)} className="btn-ghost p-1"><Edit2 size={12} /></button>}
+                        {canAdjustStock && item.track_stock && (
+                          <button onClick={() => openStockAdjust(item)} className="btn-ghost p-1" title="Adjust stock"><Hash size={12} /></button>
+                        )}
+                        {canManage && (item.status === 'archived'
                           ? <button onClick={() => restoreItem(item)} className="btn-ghost p-1 hover:text-status-success" title="Restore"><RotateCcw size={12} /></button>
-                          : <button onClick={() => deleteItem(item.id)} className="btn-ghost p-1 hover:text-status-error" title="Delete"><Trash2 size={12} /></button>}
+                          : <button onClick={() => deleteItem(item.id)} className="btn-ghost p-1 hover:text-status-error" title="Delete"><Trash2 size={12} /></button>)}
                       </div>
                     </div>
                   </div>
@@ -320,10 +364,13 @@ export default function MenuPage() {
                     <td className="table-cell"><div className="flex items-center gap-1.5"><StatusBadge status={item.status} /><StockBadge item={item} /></div></td>
                     <td className="table-cell">
                       <div className="flex gap-1">
-                        <button onClick={() => openEdit(item)} className="btn-ghost p-1"><Edit2 size={13} /></button>
-                        {item.status === 'archived'
+                        {canManage && <button onClick={() => openEdit(item)} className="btn-ghost p-1"><Edit2 size={13} /></button>}
+                        {canAdjustStock && item.track_stock && (
+                          <button onClick={() => openStockAdjust(item)} className="btn-ghost p-1" title="Adjust stock"><Hash size={13} /></button>
+                        )}
+                        {canManage && (item.status === 'archived'
                           ? <button onClick={() => restoreItem(item)} className="btn-ghost p-1 hover:text-status-success" title="Restore"><RotateCcw size={13} /></button>
-                          : <button onClick={() => deleteItem(item.id)} className="btn-ghost p-1 hover:text-status-error" title="Delete"><Trash2 size={13} /></button>}
+                          : <button onClick={() => deleteItem(item.id)} className="btn-ghost p-1 hover:text-status-error" title="Delete"><Trash2 size={13} /></button>)}
                       </div>
                     </td>
                   </tr>
@@ -524,6 +571,32 @@ export default function MenuPage() {
           </div>
         </div>
       )}
+
+      <Modal open={!!stockAdjustItem} onClose={() => setStockAdjustItem(null)} title="Adjust Stock" size="sm">
+        {stockAdjustItem && (
+          <div className="p-4 space-y-4">
+            <div>
+              <p className="text-sm font-medium text-text-primary">{stockAdjustItem.name}</p>
+              <p className="text-xs text-text-muted">Currently {stockAdjustItem.stock_quantity ?? 0} in stock</p>
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1">New stock count</label>
+              <input
+                type="number" min={0} step={1} autoFocus
+                value={stockAdjustValue} onChange={e => setStockAdjustValue(e.target.value)}
+                className="input"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setStockAdjustItem(null)} className="btn-secondary flex-1">Cancel</button>
+              <button onClick={saveStockAdjustment} disabled={savingStockAdjust} className="btn-primary flex-1 flex items-center justify-center gap-2">
+                {savingStockAdjust && <div className="w-3 h-3 border-2 border-black/30 border-t-black rounded-full animate-spin" />}
+                Save
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
