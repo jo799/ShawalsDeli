@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Search, Grid, List, Star, Edit2, Trash2, X, RotateCcw, Zap, Hash } from 'lucide-react';
+import { Plus, Search, Grid, List, Star, Edit2, Trash2, X, RotateCcw, Zap, ArrowLeftRight } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
 import { formatCurrency, cn, resolveMenuImage, menuImagePlaceholder } from '@/lib/utils';
@@ -21,9 +21,15 @@ const EMPTY_ITEM = {
 };
 
 export default function MenuPage() {
-  const { hasPermission } = useAuthStore();
+  const { hasPermission, user } = useAuthStore();
   const canManage = hasPermission('menu.manage');
   const canAdjustStock = canManage || hasPermission('menu.adjust_stock');
+  // Deliberately narrower than canManage — cashier and head_chef can add,
+  // edit, and remove items freely, but pricing decisions stay with
+  // admin/manager. The backend enforces this independently (a submitted
+  // price from anyone else is simply ignored), this is just what keeps the
+  // UI from implying they can do something the server will quietly undo.
+  const canSetPrice = user?.role === 'administrator' || user?.role === 'manager';
 
   // Quick stock adjustment — deliberately a separate, narrow modal rather
   // than reusing the full edit form. Cashier and head_chef can correct a
@@ -317,7 +323,7 @@ export default function MenuPage() {
                       <div className="flex gap-1">
                         {canManage && <button onClick={() => openEdit(item)} className="btn-ghost p-1"><Edit2 size={12} /></button>}
                         {canAdjustStock && item.track_stock && (
-                          <button onClick={() => openStockAdjust(item)} className="btn-ghost p-1" title="Adjust stock"><Hash size={12} /></button>
+                          <button onClick={() => openStockAdjust(item)} className="btn-ghost p-1" title="Adjust stock"><ArrowLeftRight size={12} /></button>
                         )}
                         {canManage && (item.status === 'archived'
                           ? <button onClick={() => restoreItem(item)} className="btn-ghost p-1 hover:text-status-success" title="Restore"><RotateCcw size={12} /></button>
@@ -366,7 +372,7 @@ export default function MenuPage() {
                       <div className="flex gap-1">
                         {canManage && <button onClick={() => openEdit(item)} className="btn-ghost p-1"><Edit2 size={13} /></button>}
                         {canAdjustStock && item.track_stock && (
-                          <button onClick={() => openStockAdjust(item)} className="btn-ghost p-1" title="Adjust stock"><Hash size={13} /></button>
+                          <button onClick={() => openStockAdjust(item)} className="btn-ghost p-1" title="Adjust stock"><ArrowLeftRight size={13} /></button>
                         )}
                         {canManage && (item.status === 'archived'
                           ? <button onClick={() => restoreItem(item)} className="btn-ghost p-1 hover:text-status-success" title="Restore"><RotateCcw size={13} /></button>
@@ -454,7 +460,17 @@ export default function MenuPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-text-secondary mb-1">Price (KES) *</label>
-                <input type="number" value={formData.price === 0 ? '' : formData.price} onChange={e => setFormData(p => ({...p, price: e.target.value === '' ? 0 : +e.target.value}))} className="input" />
+                <input
+                  type="number" value={formData.price === 0 ? '' : formData.price}
+                  onChange={e => setFormData(p => ({...p, price: e.target.value === '' ? 0 : +e.target.value}))}
+                  className="input" disabled={!canSetPrice}
+                  title={!canSetPrice ? 'Only an admin or manager can set the price' : undefined}
+                />
+                {!canSetPrice && (
+                  <p className="text-[10px] text-text-muted mt-1">
+                    {selected ? 'Only an admin or manager can change the price.' : 'Saved at KES 0 — an admin or manager needs to set the real price.'}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-text-secondary mb-1">Cost (KES)</label>
