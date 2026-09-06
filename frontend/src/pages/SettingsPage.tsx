@@ -65,6 +65,7 @@ export default function SettingsPage() {
   const { user } = useAuthStore();
   const canManage = user?.role === 'administrator' || user?.role === 'manager';
   const canBackup = user?.role === 'administrator';
+  const canViewAuditLog = canManage;
 
   const [activeTab, setActiveTab] = useState('General');
   const [loading, setLoading] = useState(true);
@@ -173,12 +174,12 @@ export default function SettingsPage() {
   }, [activeTab, canBackup]);
 
   useEffect(() => {
-    if (activeTab === 'Audit Log' && canBackup) {
+    if (activeTab === 'Audit Log' && canViewAuditLog) {
       api.get('/audit-logs/actions').then(r => setAuditActions(r.data.data)).catch(() => {});
       fetchAuditLogs();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, canBackup]);
+  }, [activeTab, canViewAuditLog]);
 
   const fetchAuditLogs = async (page = 1) => {
     setLoadingAudit(true);
@@ -717,10 +718,10 @@ export default function SettingsPage() {
           {activeTab === 'Audit Log' && (
             <div className="space-y-5">
               <h2 className="section-title flex items-center gap-2"><ScrollText size={18} /> Audit Log</h2>
-              {!canBackup ? (
+              {!canViewAuditLog ? (
                 <div className="card p-5 text-center">
                   <Shield size={24} className="text-text-muted mx-auto mb-2" />
-                  <p className="text-xs text-text-muted">A record of who did what across the whole system — restricted to administrators.</p>
+                  <p className="text-xs text-text-muted">A record of who did what across the whole system — restricted to administrators and managers.</p>
                 </div>
               ) : (
                 <>
