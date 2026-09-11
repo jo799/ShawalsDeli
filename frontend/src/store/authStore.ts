@@ -15,6 +15,10 @@ interface User {
   email: string;
   role: string;
   avatar_url?: string;
+  // Set only when an admin has customized this specific person's access
+  // independent of their role — null/undefined means "use the role's
+  // normal permissions", exactly like everyone else.
+  permission_overrides?: Permission[] | null;
 }
 
 interface AuthState {
@@ -99,6 +103,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   hasPermission: (permission) => {
     const { user, customRolePermissions, customRolePermissionsLoaded } = get();
     if (!user) return false;
+    if (user.permission_overrides) return user.permission_overrides.includes(permission);
     if (isBuiltInRole(user.role)) return checkPermission(user.role, permission);
     if (!customRolePermissionsLoaded) return false;
     return (customRolePermissions ?? []).includes(permission);

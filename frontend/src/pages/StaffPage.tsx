@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Search, RefreshCw, MoreVertical, UserPlus, Shield, Users, UserCheck, UserMinus, Wallet, Check, X, Edit2, KeyRound, UserX, UserCheck2, Trash2 } from 'lucide-react';
+import { Plus, Search, RefreshCw, MoreVertical, UserPlus, Shield, Users, UserCheck, UserMinus, Wallet, Check, X, Edit2, KeyRound, UserX, UserCheck2, Trash2, ShieldCheck } from 'lucide-react';
 import api from '@/lib/api';
 import { confirmDelete } from '@/lib/confirmPreference';
 // Relative import rather than the @shared/* alias — this file lives at a
@@ -17,6 +17,7 @@ interface StaffMember {
   id: string; full_name: string; email: string; phone?: string;
   role: string; status: string; schedule_type: string;
   avatar_url?: string; joined_date?: string; last_login?: string;
+  permission_overrides?: Permission[] | null;
 }
 interface PendingUser {
   id: string; full_name: string; email: string; phone?: string; created_at: string;
@@ -73,6 +74,9 @@ export default function StaffPage() {
   const [showRolesModal, setShowRolesModal] = useState(false);
   const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
   const [showAddRole, setShowAddRole] = useState(false);
+  const [customizingAccessFor, setCustomizingAccessFor] = useState<StaffMember | null>(null);
+  const [accessPermissions, setAccessPermissions] = useState<Permission[]>([]);
+  const [savingAccess, setSavingAccess] = useState(false);
   const [quickAddFromStaffForm, setQuickAddFromStaffForm] = useState(false);
   const [newRoleLabel, setNewRoleLabel] = useState('');
   const [newRolePermissions, setNewRolePermissions] = useState<Permission[]>([]);
@@ -208,6 +212,59 @@ export default function StaffPage() {
   const closeStaffModal = () => {
     setShowAdd(false);
     setShowAddRole(false); setQuickAddFromStaffForm(false); setNewRoleLabel(''); setNewRolePermissions([]);
+  };
+
+  // What this person can ACTUALLY do right now — their own override if one
+  // exists, otherwise whatever their role (built-in or custom) normally
+  // grants. This is what pre-populates the checkboxes, so opening the
+  // dialog always shows their real current access, not a blank slate.
+  const getEffectivePermissions = (member: StaffMember): Permission[] => {
+    if (member.permission_overrides) return member.permission_overrides;
+    if ((ROLES as readonly string[]).includes(member.role)) return ROLE_PERMISSIONS[member.role as Role];
+    return customRoles.find(r => r.name === member.role)?.permissions ?? [];
+  };
+
+  const openCustomizeAccess = (member: StaffMember) => {
+    setCustomizingAccessFor(member);
+    setAccessPermissions(getEffectivePermissions(member));
+    setOpenMenuId(null);
+  };
+
+  const toggleAccessPermission = (perm: Permission) => {
+    setAccessPermissions(prev => prev.includes(perm) ? prev.filter(p => p !== perm) : [...prev, perm]);
+  };
+
+  const saveAccessCustomization = async () => {
+    if (!customizingAccessFor) return;
+    if (accessPermissions.length === 0) { toast.error('Pick at least one permission, or use "Reset to Role Default" instead'); return; }
+    setSavingAccess(true);
+    try {
+      const { data } = await api.put(`/staff/${customizingAccessFor.id}/permissions`, { permissions: accessPermissions });
+      toast.success(data.message || 'Access updated');
+      setStaff(prev => prev.map(m => m.id === customizingAccessFor.id ? { ...m, permission_overrides: data.data.permission_overrides } : m));
+      setCustomizingAccessFor(null);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update access';
+      toast.error(msg);
+    } finally {
+      setSavingAccess(false);
+    }
+  };
+
+  const resetAccessToRoleDefault = async () => {
+    if (!customizingAccessFor) return;
+    setSavingAccess(true);
+    try {
+      const { data } = await api.put(`/staff/${customizingAccessFor.id}/permissions`, { permissions: null });
+      toast.success(data.message || 'Reset to role default');
+      setStaff(prev => prev.map(m => m.id === customizingAccessFor.id ? { ...m, permission_overrides: null } : m));
+      setCustomizingAccessFor(null);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to reset access';
+      toast.error(msg);
+    } finally {
+      setSavingAccess(false);
+    }
   };
 
   const togglePermission = (perm: Permission) => {
@@ -348,6 +405,9 @@ export default function StaffPage() {
                         <span className={`badge text-xs ${ROLE_BADGE[member.role] || 'badge-muted'}`}>
                           {getRoleLabel(member.role)}
                         </span>
+                        {member.permission_overrides && (
+                          <span title="Access customized for this person" className="ml-1 inline-flex"><ShieldCheck size={11} className="text-brand" /></span>
+                        )}
                       </td>
                       <td className="table-cell text-text-secondary text-xs">{member.phone || '—'}</td>
                       <td className="table-cell"><StatusBadge status={member.status} /></td>
@@ -372,6 +432,11 @@ export default function StaffPage() {
                             <button onClick={() => toggleActive(member)} className={`w-full text-left px-3 py-2 text-xs hover:bg-surface-50 flex items-center gap-2 ${member.status === 'inactive' ? 'text-status-success' : 'text-status-error'}`}>
                               {member.status === 'inactive' ? <><UserCheck2 size={12} /> Reactivate</> : <><UserX size={12} /> Deactivate</>}
                             </button>
+                            {currentUser?.role === 'administrator' && member.role !== 'administrator' && (
+                              <button onClick={() => openCustomizeAccess(member)} className="w-full text-left px-3 py-2 text-xs hover:bg-surface-50 flex items-center gap-2">
+                                <ShieldCheck size={12} /> Customize Access
+                              </button>
+                            )}
                             {currentUser?.role === 'administrator' && member.id !== currentUser?.id && (
                               <button onClick={() => deleteStaffMember(member)} className="w-full text-left px-3 py-2 text-xs hover:bg-surface-50 flex items-center gap-2 text-status-error border-t border-border">
                                 <Trash2 size={12} /> Delete Permanently
@@ -757,6 +822,51 @@ export default function StaffPage() {
             )}
           </div>
         </div>
+      </Modal>
+
+      {/* Customize Access — a per-person override, independent of whatever
+          the staff member's role would normally grant. Distinct from
+          custom roles above: that defines a reusable template for many
+          people; this customizes exactly one person. */}
+      <Modal open={!!customizingAccessFor} onClose={() => setCustomizingAccessFor(null)} title="Customize Access" size="md">
+        {customizingAccessFor && (
+          <div className="p-5 space-y-4">
+            <div>
+              <p className="text-sm font-medium text-text-primary">{customizingAccessFor.full_name}</p>
+              <p className="text-xs text-text-muted">
+                {getRoleLabel(customizingAccessFor.role)}
+                {customizingAccessFor.permission_overrides && <span className="ml-1.5 text-brand">· access customized</span>}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs text-text-muted mb-1.5">What can this person access?</label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-2">
+                {MATRIX_MODULES.map(m => (
+                  <label key={m.key} className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input
+                      type="checkbox" checked={accessPermissions.includes(m.key)}
+                      onChange={() => toggleAccessPermission(m.key)}
+                      className="rounded border-border"
+                    />
+                    {m.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              {customizingAccessFor.permission_overrides && (
+                <button onClick={resetAccessToRoleDefault} disabled={savingAccess} className="btn-secondary flex-1 text-xs py-2 disabled:opacity-50">
+                  Reset to Role Default
+                </button>
+              )}
+              <button onClick={saveAccessCustomization} disabled={savingAccess} className="btn-primary flex-1 text-xs py-2 disabled:opacity-50">
+                {savingAccess ? 'Saving…' : 'Save Access'}
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );
