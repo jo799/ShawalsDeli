@@ -601,7 +601,7 @@ const helpSections: HelpSection[] = [
       {
         title: 'How customers earn points',
         notes: [
-          '1 point per KES 100 spent when the order is fully paid and completed.',
+          '1 point per KES 20 spent when the order is fully paid and completed.',
           'Points are not earned on the portion of a bill paid with redeemed points.',
           'Customer must be attached to the order at POS; toggle award points on before checkout.',
         ],

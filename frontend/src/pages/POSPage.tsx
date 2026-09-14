@@ -349,10 +349,16 @@ export default function POSPage() {
     ...(posConfig.enableTill ? ['Till'] : []),
     ...(isOnline ? ['Split Bill'] : []),
   ], [posConfig.enableMpesa, posConfig.enableCard, posConfig.enableTill, isOnline]);
-  const maxPointsUsable = Math.min(
-    selectedCustomer?.available_points || 0,
-    pointValueKes > 0 ? Math.floor(balanceDueDisplay / pointValueKes) : 0
-  );
+  // Deliberately never rounds down to 0 just because the order is smaller
+  // than what one point is worth (e.g. a KES 15 item against a KES 20
+  // point value) — a customer with real points should always be able to
+  // attempt redeeming at least one. The backend is the final authority on
+  // whether the amount actually fits the balance, with a clear message if
+  // it doesn't.
+  const availablePoints = selectedCustomer?.available_points || 0;
+  const maxPointsUsable = availablePoints > 0 && balanceDueDisplay > 0
+    ? Math.max(1, Math.min(availablePoints, pointValueKes > 0 ? Math.floor(balanceDueDisplay / pointValueKes) : availablePoints))
+    : 0;
   useEffect(() => {
     if (!availableMethods.includes(paymentMethod)) setPaymentMethod('Cash');
   }, [paymentMethod, availableMethods]);
