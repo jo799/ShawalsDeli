@@ -244,7 +244,7 @@ export default function LoyaltyPointsPage() {
             <h2 className="section-title text-sm">Point Value</h2>
           </div>
           <p className="text-lg font-bold text-brand">KES {stats.point_value_kes} <span className="text-xs text-text-muted font-normal">/ point</span></p>
-          <p className="text-[11px] text-text-muted mt-1">Fixed — 1 point always equals KES 1, matching the 1-point-per-KES-20-spent earn rate. Not configurable, so it can never drift out of sync with what a point is actually worth.</p>
+          <p className="text-[11px] text-text-muted mt-1">Earn rate: 1 point per KES 20 spent.</p>
         </div>
 
         {canManage && (
