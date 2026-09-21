@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Search, Star, Wallet, Settings2, Coins, Gift, Users } from 'lucide-react';
+import { RefreshCw, Search, Star, Wallet, Coins, Gift, Users } from 'lucide-react';
 import api from '@/lib/api';
 import { formatDate, formatCurrency, getInitials } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
@@ -43,15 +43,10 @@ export default function LoyaltyPointsPage() {
   const [actionReason, setActionReason] = useState('');
   const [processingAction, setProcessingAction] = useState(false);
 
-  const [showPointValueModal, setShowPointValueModal] = useState(false);
-  const [pointValueInput, setPointValueInput] = useState('1');
-  const [savingPointValue, setSavingPointValue] = useState(false);
-
   const fetchStats = useCallback(async () => {
     try {
       const { data } = await api.get('/loyalty/stats');
       setStats(data.data);
-      setPointValueInput(String(data.data.point_value_kes));
     } catch { /* non-critical for the main table */ }
   }, []);
 
@@ -106,19 +101,6 @@ export default function LoyaltyPointsPage() {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Action failed';
       toast.error(msg);
     } finally { setProcessingAction(false); }
-  };
-
-  const savePointValue = async () => {
-    const value = parseFloat(pointValueInput);
-    if (!Number.isFinite(value) || value <= 0) { toast.error('Enter a valid positive amount'); return; }
-    setSavingPointValue(true);
-    try {
-      await api.put('/loyalty/point-value', { point_value_kes: value });
-      toast.success('Point value updated');
-      setShowPointValueModal(false);
-      fetchStats();
-    } catch { toast.error('Failed to update point value'); }
-    finally { setSavingPointValue(false); }
   };
 
   return (
@@ -260,14 +242,9 @@ export default function LoyaltyPointsPage() {
         <div className="card p-4">
           <div className="flex items-center justify-between mb-1">
             <h2 className="section-title text-sm">Point Value</h2>
-            {canManage && (
-              <button onClick={() => { setPointValueInput(String(stats.point_value_kes)); setShowPointValueModal(true); }} className="btn-ghost p-1">
-                <Settings2 size={13} />
-              </button>
-            )}
           </div>
           <p className="text-lg font-bold text-brand">KES {stats.point_value_kes} <span className="text-xs text-text-muted font-normal">/ point</span></p>
-          <p className="text-[11px] text-text-muted mt-1">e.g. 1 point = {formatCurrency(100 * stats.point_value_kes)} when redeemed.</p>
+          <p className="text-[11px] text-text-muted mt-1">Fixed — 1 point always equals KES 1, matching the 1-point-per-KES-20-spent earn rate. Not configurable, so it can never drift out of sync with what a point is actually worth.</p>
         </div>
 
         {canManage && (
@@ -310,26 +287,6 @@ export default function LoyaltyPointsPage() {
             <button onClick={() => { setActionMember(null); setActionType(null); }} className="btn-secondary flex-1">Cancel</button>
             <button onClick={submitAction} disabled={processingAction} className="btn-primary flex-1 disabled:opacity-50">
               {processingAction ? 'Processing…' : actionType === 'redeem' ? 'Redeem' : 'Apply Adjustment'}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Point Value Settings Modal */}
-      <Modal open={showPointValueModal} onClose={() => setShowPointValueModal(false)} title="Point Value">
-        <div className="space-y-4">
-          <p className="text-xs text-text-muted">The KES value of a single loyalty point when redeemed — applies everywhere points are shown as a value.</p>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">KES per point</label>
-            <div className="relative">
-              <Wallet size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
-              <input type="number" step="0.01" min="0.01" className="input pl-9" value={pointValueInput} onChange={e => setPointValueInput(e.target.value)} />
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <button onClick={() => setShowPointValueModal(false)} className="btn-secondary flex-1">Cancel</button>
-            <button onClick={savePointValue} disabled={savingPointValue} className="btn-primary flex-1 disabled:opacity-50">
-              {savingPointValue ? 'Saving…' : 'Save'}
             </button>
           </div>
         </div>
