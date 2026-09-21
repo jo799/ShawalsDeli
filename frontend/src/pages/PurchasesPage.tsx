@@ -11,7 +11,7 @@ interface PurchaseOrder {
   id: string; po_number: string; supplier_id: string; supplier_name?: string; supplier_phone?: string;
   status: string; order_date: string; expected_date?: string; received_date?: string;
   subtotal: number; discount: number; tax: number; total_amount: number;
-  payment_status: string; funding_source?: string; notes?: string; received_percentage?: number;
+  payment_status: string; payment_method?: string; funding_source?: string; notes?: string; received_percentage?: number;
   items?: POItem[];
 }
 interface POItem {
@@ -39,6 +39,12 @@ export default function PurchasesPage() {
   const { user } = useAuthStore();
   const canManage = user?.role === 'administrator' || user?.role === 'manager';
   const [updatingPaymentStatus, setUpdatingPaymentStatus] = useState(false);
+  // Marking a PO 'paid' now needs to say HOW it was paid — Cash Position
+  // reporting can't tell cash-from-the-drawer apart from a bank/M-Pesa
+  // transfer otherwise. Holds the pending payment_method choice while the
+  // small inline picker below is open, before the actual API call fires.
+  const [pendingPaidMethod, setPendingPaidMethod] = useState<string>('cash');
+  const [askingPaymentMethod, setAskingPaymentMethod] = useState(false);
   const [updatingFundingSource, setUpdatingFundingSource] = useState(false);
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -92,6 +98,7 @@ export default function PurchasesPage() {
   }, []);
 
   const viewDetail = async (order: PurchaseOrder): Promise<PurchaseOrder> => {
+    setAskingPaymentMethod(false);
     try {
       const { data } = await api.get(`/purchases/${order.id}`);
       setSelected(data.data);
@@ -131,13 +138,24 @@ export default function PurchasesPage() {
 
   // Real CSV export of the currently loaded purchase orders list — was a
   // dead button before, no onClick at all.
-  const updatePaymentStatus = async (status: 'unpaid' | 'partial' | 'paid') => {
+  const updatePaymentStatus = async (status: 'unpaid' | 'partial' | 'paid', method?: string) => {
     if (!selected) return;
+    // 'paid' needs a payment_method so cash reporting can tell a cash
+    // settlement apart from one that never touched the till — ask first
+    // via the inline picker instead of firing the request without it.
+    if (status === 'paid' && !method) {
+      setAskingPaymentMethod(true);
+      return;
+    }
     setUpdatingPaymentStatus(true);
     try {
-      const { data } = await api.put(`/purchases/${selected.id}/payment-status`, { payment_status: status });
-      setSelected(prev => prev ? { ...prev, payment_status: status } : prev);
-      setOrders(prev => prev.map(o => o.id === selected.id ? { ...o, payment_status: status } : o));
+      const { data } = await api.put(`/purchases/${selected.id}/payment-status`, {
+        payment_status: status,
+        ...(status === 'paid' ? { payment_method: method } : {}),
+      });
+      setSelected(prev => prev ? { ...prev, payment_status: status, payment_method: status === 'paid' ? method : undefined } : prev);
+      setOrders(prev => prev.map(o => o.id === selected.id ? { ...o, payment_status: status, payment_method: status === 'paid' ? method : undefined } : o));
+      setAskingPaymentMethod(false);
       toast.success(data.message || 'Payment status updated');
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not update payment status';
@@ -181,16 +199,18 @@ export default function PurchasesPage() {
       const rows: string[][] = [
         [`Period: ${periodLabel}${start_date ? ` (${start_date} to ${end_date})` : ''}`],
         [],
-        ['PO Number', 'Supplier', 'Status', 'Order Date', 'Expected Date', 'Payment Status', 'Total Amount', 'Funded By'],
+        ['PO Number', 'Supplier', 'Status', 'Order Date', 'Expected Date', 'Payment Status', 'Paid Via', 'Total Amount', 'Funded By'],
       ];
       all.forEach(o => rows.push([
         o.po_number, o.supplier_name || '', o.status, o.order_date?.slice(0, 10) || '',
-        o.expected_date?.slice(0, 10) || '', o.payment_status, String(o.total_amount),
+        o.expected_date?.slice(0, 10) || '', o.payment_status,
+        o.payment_status === 'paid' ? (o.payment_method || '').replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) : '',
+        String(o.total_amount),
         o.funding_source === 'owner_personal' ? "Owner's Personal Money" : 'Business Funds',
       ]));
       const total = all.reduce((sum, o) => sum + Number(o.total_amount), 0);
-      rows.push(['', '', '', '', '', '', '', '']);
-      rows.push(['TOTAL', '', '', '', '', '', String(total), '']);
+      rows.push(['', '', '', '', '', '', '', '', '']);
+      rows.push(['TOTAL', '', '', '', '', '', '', String(total), '']);
       const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
@@ -552,6 +572,38 @@ export default function PurchasesPage() {
                   <span className="font-medium">{selected.payment_status?.replace(/\b\w/g, l => l.toUpperCase()) || '—'}</span>
                 )}
               </div>
+              {canManage && askingPaymentMethod && (
+                <div className="flex justify-between items-center bg-surface-50 rounded px-2 py-1.5">
+                  <span className="text-text-muted">Paid via</span>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={pendingPaidMethod}
+                      disabled={updatingPaymentStatus}
+                      onChange={e => setPendingPaidMethod(e.target.value)}
+                      className="select text-xs py-1 disabled:opacity-50"
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="mpesa">M-Pesa</option>
+                      <option value="bank_transfer">Bank Transfer</option>
+                      <option value="card">Card</option>
+                    </select>
+                    <button
+                      type="button"
+                      disabled={updatingPaymentStatus}
+                      onClick={() => updatePaymentStatus('paid', pendingPaidMethod)}
+                      className="btn btn-primary text-xs py-1 px-2 disabled:opacity-50"
+                    >
+                      Confirm
+                    </button>
+                  </div>
+                </div>
+              )}
+              {selected.payment_status === 'paid' && selected.payment_method && (
+                <div className="flex justify-between">
+                  <span className="text-text-muted">Paid Via</span>
+                  <span className="font-medium">{selected.payment_method.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+                </div>
+              )}
               <div className="flex justify-between items-center">
                 <span className="text-text-muted">Funded By</span>
                 {canManage ? (

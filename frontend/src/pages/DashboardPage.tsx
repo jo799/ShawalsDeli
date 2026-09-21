@@ -166,7 +166,7 @@ export default function DashboardPage() {
         ['Net Profit Margin', `${d.net_profit_margin}%`, 'Net Profit as a percentage of Net Sales'],
         ['', '', ''],
         ['CASH & INVENTORY', '', ''],
-        ['Cash Position', formatCurrency(d.cash_position), 'Cash-method payments received in this period, minus expenses and any purchase order paid in full during the same period'],
+        ['Cash Position', formatCurrency(d.cash_position), 'Cash-method sales received in this period, minus cash refunds issued, cash-paid expenses, and purchase orders settled in cash — money that actually moved through the physical till, not M-Pesa/card/bank-transfer activity'],
         ['Inventory Value', formatCurrency(d.inventory_value), 'Current stock quantity x cost per unit, for all active items - a live snapshot as of now, not scoped to this period'],
         ['', '', ''],
         ['PURCHASES & WASTE', '', ''],
@@ -286,7 +286,7 @@ export default function DashboardPage() {
             { label: 'Revenue Today', value: formatCurrency(stats.today_sales), color: 'text-text-primary' },
             { label: 'Gross Profit', value: formatCurrency(stats.gross_profit), color: 'text-status-success' },
             { label: 'Net Profit', value: formatCurrency(stats.net_profit), color: stats.net_profit >= 0 ? 'text-status-success' : 'text-status-error' },
-            { label: 'Cash Position', value: formatCurrency(stats.cash_position), color: stats.cash_position >= 0 ? 'text-status-success' : 'text-status-error', sub: 'today' },
+            { label: 'Cash Position', value: formatCurrency(stats.cash_position), color: stats.cash_position >= 0 ? 'text-status-success' : 'text-status-error', sub: 'cash only, today' },
             { label: 'Inventory Value', value: formatCurrency(stats.inventory_value), color: 'text-status-purple', sub: 'on hand now' },
             { label: 'Purchases', value: formatCurrency(stats.purchases_this_month), color: 'text-text-primary', sub: 'this month' },
           ].map(kpi => (

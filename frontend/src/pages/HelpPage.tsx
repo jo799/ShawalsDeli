@@ -395,7 +395,7 @@ const helpSections: HelpSection[] = [
         title: 'Business Health — read the whole business in 30 seconds',
         notes: [
           'Revenue Today and Gross Profit / Net Profit today — the full chain from sales down to actual bottom line.',
-          'Cash Position today — real money collected today minus today\'s expenses and any purchase paid in full today.',
+          'Cash Position today — cash-method sales collected today, minus cash refunds issued, cash-paid expenses, and purchases settled in cash today. M-Pesa, Till, card, and bank-transfer activity never enter this figure — it tracks physical cash in the till only.',
           'Inventory Value — what\'s on the shelf right now, valued at current cost.',
           'Purchases and Expenses — both scoped to this month, not just today.',
           'Food Cost % — cost of goods sold as a share of net sales; the standard restaurant efficiency number.',
@@ -537,7 +537,7 @@ const helpSections: HelpSection[] = [
           'Change Payment Status to Unpaid, Partial, or Paid as you actually pay the supplier.',
         ],
         notes: [
-          'This matters beyond bookkeeping — Cash Position on the Dashboard only counts a purchase as money out once it\'s marked Paid.',
+          'This matters beyond bookkeeping — marking a PO Paid now also asks how it was paid (Cash, M-Pesa, Bank Transfer, or Card). Cash Position on the Dashboard only subtracts a purchase once it\'s marked Paid AND that payment method is Cash — a supplier settled by bank transfer or M-Pesa never touches the till, so it never touches this figure.',
         ],
       },
       {
