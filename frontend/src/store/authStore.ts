@@ -52,16 +52,30 @@ const isBuiltInRole = (role: string) => (ROLES as readonly string[]).includes(ro
 // Fire-and-forget: looks up this one role's permissions (the endpoint is
 // open to any authenticated user, unlike the full custom-roles list, since
 // a custom-role user needs to resolve their own access without needing
-// admin/manager rights just to check themselves). Silently treats a
-// missing/errored lookup as "no permissions" rather than throwing —
-// consistent with hasPermission's fail-closed default during the loading
-// window itself.
-const loadCustomRolePermissions = async (role: string, set: (partial: Partial<AuthState>) => void) => {
+// admin/manager rights just to check themselves).
+//
+// A genuine "no" (404 — role deleted, or any other server response) fails
+// closed immediately, same as before: that's a real answer, not treating
+// it as a real answer would risk momentarily granting access. But this
+// used to treat a plain dropped connection identically to a real 404 —
+// one flaky request (far more likely on a mobile connection) permanently
+// cached "this role has zero permissions", which blanks the sidebar and
+// every permission-gated dashboard card until the person logs out and
+// back in. A network failure (no error.response at all — the request
+// never reached the server, or never came back) gets a few quick retries
+// first; only a request that actually reached the server and got a real
+// answer, or repeated network failures, settles into fail-closed.
+const loadCustomRolePermissions = async (role: string, set: (partial: Partial<AuthState>) => void, attempt = 1): Promise<void> => {
   if (isBuiltInRole(role)) { set({ customRolePermissions: null, customRolePermissionsLoaded: true }); return; }
   try {
     const { data } = await api.get(`/roles/custom/${encodeURIComponent(role)}`);
     set({ customRolePermissions: data.data.permissions as Permission[], customRolePermissionsLoaded: true });
-  } catch {
+  } catch (error: unknown) {
+    const isNetworkFailure = !(error as { response?: unknown })?.response;
+    if (isNetworkFailure && attempt < 3) {
+      setTimeout(() => loadCustomRolePermissions(role, set, attempt + 1), attempt * 1000);
+      return;
+    }
     set({ customRolePermissions: [], customRolePermissionsLoaded: true });
   }
 };
