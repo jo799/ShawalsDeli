@@ -91,7 +91,13 @@ export default function DashboardPage() {
           api.get('/inventory').catch(() => ({ data: { stats: { low_stock: 0 } } })),
           api.get('/customers', { params: { limit: 1, status: 'active', include_growth: true } }).catch(() => ({ data: { pagination: { total: 0 } } })),
           api.get('/menu/items', { params: { limit: 1, status: 'unavailable,out_of_stock' } }).catch(() => ({ data: { pagination: { total: 0 } } })),
-          api.get('/reports/owner-dashboard', { params: { expenses_period: expensesPeriod } }).catch(() => ({ data: { data: null } })),
+          // Same ?date= /reports/daily uses, rather than each endpoint
+          // independently deciding what "today" is — on a dev machine (or
+          // a Docker Postgres container) whose clock can drift from the
+          // browser's, two independently-computed "today"s can disagree,
+          // which looks exactly like Cash Position silently refusing to
+          // count a transaction that Today's Sales already picked up.
+          api.get('/reports/owner-dashboard', { params: { date: today, expenses_period: expensesPeriod } }).catch(() => ({ data: { data: null } })),
         ]);
 
         const rep = reportRes.data.data;
@@ -136,6 +142,24 @@ export default function DashboardPage() {
       finally { setLoading(false); }
     };
     load();
+
+    // The dashboard otherwise only ever fetches once, on mount — so a cash
+    // sale rung up on the POS page in another tab/window (the exact way
+    // this gets tested) never shows up here until something forces a
+    // refetch. Two triggers, both cheap and idempotent: a 30s poll while
+    // this tab is the one being looked at, and an immediate refetch the
+    // moment the tab regains focus (covers "I switched to POS, made a
+    // sale, switched back" without waiting out the poll interval).
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') load();
+    }, 30000);
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
   }, [expensesPeriod]);
 
   // Every figure explained in plain language right next to its value, since

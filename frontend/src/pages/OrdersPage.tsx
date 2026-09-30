@@ -19,7 +19,23 @@ interface Order {
   served_by_name?: string; prepared_by_name?: string;
   has_refund?: boolean; // present on list rows
   refunds?: Array<{ id: string; amount: number; reason: string | null; created_at: string }>; // present on the detail fetch
+  // Present on the detail fetch (GET /orders/:id) — the order's real payment
+  // history, used to default/validate the refund method against how the
+  // order was actually paid rather than guessing.
+  payments?: Array<{ payment_method: string; status: string; amount: number }>;
 }
+
+// Mirrors REFUND_METHODS in backend/src/controllers/ordersController.ts.
+// 'points' is deliberately excluded — points paid on an order are reversed
+// as loyalty points, not refunded as money, so it's never a valid refund
+// method.
+const REFUND_METHOD_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'cash', label: 'Cash' },
+  { value: 'mpesa', label: 'M-Pesa' },
+  { value: 'card', label: 'Card' },
+  { value: 'till', label: 'Till' },
+  { value: 'store_credit', label: 'Store credit' },
+];
 
 interface RefundRequest {
   id: string; order_id: string; order_number: string; order_type: string; order_total: number;
@@ -64,6 +80,7 @@ export default function OrdersPage() {
   const [refundAmount, setRefundAmount] = useState('');
   const [refundReason, setRefundReason] = useState('');
   const [refundRestock, setRefundRestock] = useState(false);
+  const [refundMethod, setRefundMethod] = useState('');
   const [refunding, setRefunding] = useState(false);
   // Admin-only review queue for refund requests managers have submitted.
   const [refundRequests, setRefundRequests] = useState<RefundRequest[]>([]);
@@ -179,6 +196,18 @@ export default function OrdersPage() {
     setRefundAmount(String(Number(selected.amount_paid || 0) > 0 ? selected.amount_paid : balance));
     setRefundReason('');
     setRefundRestock(false);
+
+    // Default the refund method to how this order was actually paid — but
+    // only when that's unambiguous. A split-tender order (cash + till, say)
+    // gets left blank so the person issuing the refund has to pick, rather
+    // than the form quietly guessing and recording an M-Pesa refund as cash.
+    const paidMethods = Array.from(new Set(
+      (selected.payments || [])
+        .filter(p => p.status === 'completed' && p.payment_method !== 'points')
+        .map(p => p.payment_method)
+    ));
+    setRefundMethod(paidMethods.length === 1 ? paidMethods[0] : '');
+
     setShowRefundModal(true);
   };
 
@@ -187,6 +216,7 @@ export default function OrdersPage() {
     const amount = Number(refundAmount);
     if (!Number.isFinite(amount) || amount <= 0) { toast.error('Enter a valid refund amount'); return; }
     if (!refundReason.trim()) { toast.error('A reason is required'); return; }
+    if (!refundMethod) { toast.error('Select how this refund is going out'); return; }
     setRefunding(true);
     try {
       // Administrators refund directly (they're the approval authority for
@@ -195,7 +225,7 @@ export default function OrdersPage() {
       // admin explicitly approves it.
       const endpoint = isAdmin ? `/orders/${selected.id}/refund` : `/orders/${selected.id}/refund-request`;
       const res = await api.post(endpoint, {
-        amount, reason: refundReason.trim(), restock: refundRestock,
+        amount, reason: refundReason.trim(), restock: refundRestock, method: refundMethod,
       });
       toast.success(res.data.message || (isAdmin ? 'Refund issued' : 'Refund request submitted — awaiting admin approval'));
       setShowRefundModal(false);
@@ -509,6 +539,22 @@ export default function OrdersPage() {
               />
             </div>
             <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1">Refund method *</label>
+              <select
+                value={refundMethod}
+                onChange={e => setRefundMethod(e.target.value)}
+                className="input"
+              >
+                <option value="" disabled>How is this money going back?</option>
+                {REFUND_METHOD_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-text-muted mt-1">
+                Must match how it actually leaves — an M-Pesa refund recorded as cash understates the till count.
+              </p>
+            </div>
+            <div>
               <label className="block text-xs font-medium text-text-secondary mb-1">Reason *</label>
               <input
                 type="text"
@@ -524,7 +570,7 @@ export default function OrdersPage() {
             </label>
             <div className="flex gap-2 pt-2">
               <button onClick={() => setShowRefundModal(false)} className="btn-secondary flex-1">Cancel</button>
-              <button onClick={submitRefund} disabled={refunding || !refundReason.trim()} className="btn-primary flex-1 text-status-error disabled:opacity-50">
+              <button onClick={submitRefund} disabled={refunding || !refundReason.trim() || !refundMethod} className="btn-primary flex-1 text-status-error disabled:opacity-50">
                 {refunding ? 'Processing…' : isAdmin ? 'Issue Refund' : 'Submit Request'}
               </button>
             </div>
